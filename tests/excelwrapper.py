@@ -1,14 +1,14 @@
+from __future__ import print_function
+import os
+import sys
 # We will choose our wrapper with os compatibility
 try:
     import win32com.client
     import pythoncom
     from pycel.excelwrapper import ExcelComWrapper as ExcelWrapperImpl
 except:
-    print "Can\'t import win32com -> switch from Com to Openpyxl wrapping implementation"
+    print("Can\'t import win32com -> switch from Com to Openpyxl wrapping implementation")
     from pycel.excelwrapper import ExcelOpxWrapper as ExcelWrapperImpl
-
-import os
-import sys
 
 dir = os.path.dirname(__file__)
 path = os.path.join(dir, '../src')
@@ -22,7 +22,7 @@ def connect():
     try:
         excel.connect()
     except Exception as inst:
-        print inst
+        print(inst)
         connected = False
     assert connected == True
 
@@ -91,7 +91,7 @@ def get_ranged_names():
     assert sum(map(len,excel.rangednames)) == sum(map(len,[[(1,'SINUS','Sheet1!$C$1:$C$18')]]))
 
 connect()
-#save_as() # to disable with COM instance running 
+#save_as() # to disable with COM instance running
 set_and_get_active_sheet()
 get_range()
 get_used_range()
