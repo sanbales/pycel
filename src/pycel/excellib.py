@@ -9,6 +9,14 @@ from pycel.excelutil import (date_from_int, find_corresponding_index, flatten,
                              integer_types, is_leap_year, is_number, list_types,
                              normalize_year, number_types, string_types)
 
+__all__ = ('average', 'count', 'countif', 'countifs', 'date', 'index', 'isNa', 'linest',
+           'ln', 'lookup', 'match', 'mid', 'mod', 'npv', 'right', 'roundup', 'sumif',
+           'value', 'vlookup', 'yearfrac',
+           'xl_log', 'xl_round',
+           'xl_eq', 'xl_neq', 'xl_gt', 'xl_gte', 'xl_lt', 'xl_lte',
+           'xl_max', 'xl_min', 'xl_sum',
+           'FUNCTION_MAP')
+
 
 # A dictionary that maps excel function names onto python equivalents. You should
 # only add an entry to this map if the python name is different to the excel name
@@ -629,11 +637,17 @@ def mid(text, start_num, num_chars):
 
 def date(year, month, day):
     """
+    The DATE function returns the sequential serial number that represents a particular date.
 
-    :param year:
-    :param month:
-    :param day:
-    :return:
+    :param year: Required. The value of the year argument can include one to four digits.
+        Excel interprets the year argument according to the date system your computer is
+        using. By default, Microsoft Excel for Windows uses the 1900 date system, which
+        means the first date is January 1, 1900.
+    :param month: Required. A positive or negative integer representing the month of the
+        year from 1 to 12 (January to December).
+    :param day: Required. A positive or negative integer representing the day of the month from 1 to 31.
+    :return: serial number that represents the particular date.
+
     .. reference::
         https://support.office.com/en-us/article/DATE-function-e36c0c8c-4104-49da-ab83-82328b832349
 
@@ -654,7 +668,8 @@ def date(year, month, day):
     if year < 1900:
         year += 1900
 
-    year, month, day = normalize_year(year, month, day) # taking into account negative month and day values
+    # taking into account negative month and day values
+    year, month, day = normalize_year(year, month, day)
 
     date_0 = datetime(1900, 1, 1)
     date = datetime(year, month, day)
@@ -669,14 +684,28 @@ def date(year, month, day):
 
 def yearfrac(start_date, end_date, basis=0):
     """
+    Calculates the fraction of the year represented by the number of whole days between
+    two dates (the start_date and the end_date). Use the YEARFRAC worksheet function to
+    identify the proportion of a whole year's benefits or obligations to assign to a
+    specific term.
 
-    :param start_date:
-    :param end_date:
-    :param basis:
-    :return:
+    :param start_date: Required. A date that represents the start date.
+    :param end_date: Required. A date that represents the end date.
+    :param basis: Optional. The type of day count basis to use.
+    :return: Fraction of the year between the two dates.
 
     .. reference::
         https://support.office.com/en-us/article/YEARFRAC-function-3844141e-c76d-4143-82b6-208454ddc6a8
+
+    .. remarks::
+        * Microsoft Excel stores dates as sequential serial numbers so they can be used in calculations.
+            By default, January 1, 1900 is serial number 1, and January 1, 2008 is serial number 39448
+            because it is 39,448 days after January 1, 1900.
+        * All arguments are truncated to integers.
+        * If start_date or end_date are not valid dates, YEARFRAC returns the #VALUE! error value.
+        * If basis < 0 or if basis > 4, YEARFRAC returns the #NUM! error value.
+
+
     """
 
     def actual_nb_days_ISDA(start, end): # needed to separate days_in_leap_year from days_not_leap_year
@@ -855,9 +884,5 @@ def isNa(val):
     except (ValueError, TypeError):
         return True
     except Exception as exc:
-        return True
         logger.debug("'{}' evaluated as #NA but not ValueError nor TypeError, {}".format(val, exc))
-
-
-if __name__ == '__main__':
-    pass
+        return True

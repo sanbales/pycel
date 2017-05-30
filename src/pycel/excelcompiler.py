@@ -1,9 +1,10 @@
 from __future__ import print_function, division, unicode_literals
-from collections import defaultdict, OrderedDict
+from collections import defaultdict, OrderedDict, deque
 from functools import reduce
 from logging import getLogger
 from math import (acos, acosh, asin, asinh, atan, atan2, atanh, cos, cosh, exp, sin, sinh, sqrt, tan, tanh)
-from networkx import DiGraph, spring_layout, draw_networkx_nodes, draw_networkx_edges, draw_networkx_labels
+from networkx import (DiGraph, descendants,
+                      draw_networkx_nodes, draw_networkx_edges, draw_networkx_labels, spring_layout)
 from networkx.drawing.nx_pydot import write_dot
 from networkx.readwrite.gexf import write_gexf
 import pickle
@@ -27,19 +28,19 @@ logger = getLogger(__name__)
 
 
 class Spreadsheet(object):
-    def __init__(self, G, cellmap, filename=''):
+    def __init__(self, graph, cellmap, filename=''):
         super(Spreadsheet, self).__init__()
-        self.G = G
+        self.graph = graph
         self.cellmap = cellmap
         self.filename = filename
         self.params = None
 
-        self.dependent = tuple(set(edge[1].address() for edge in self.G.edges()))
+        self.dependent = tuple(set(edge[1].address() for edge in self.graph.edges()))
         self.independent = tuple([name for name, cell in self.cellmap.items()
                                   if name not in self.dependent and cell.value is not None])
 
         data = defaultdict(set)
-        for edge in self.G.edges():
+        for edge in self.graph.edges():
             data[edge[1].address()].add(edge[0].address())
         self.sorted_cells = tuple(self.topological_sort(data))
 
@@ -57,16 +58,16 @@ class Spreadsheet(object):
         Dependencies are expressed as a dictionary whose keys are items
         and whose values are a set of dependent items. Output is a list of
         sets in topological order. The first set consists of items with no
-        dependences, each subsequent set consists of items that depend upon
+        dependants, each subsequent set consists of items that depend upon
         items in the preceeding sets.
 
         >>> print('\\n'.join(repr(sorted(x)) for x in topological_sort({
-        ...     2: set([11]),
-        ...     9: set([11,8]),
-        ...     10: set([11,3]),
-        ...     11: set([7,5]),
-        ...     8: set([7,3]),
-        ...     }) ))
+        ...     2: {11},
+        ...     9: {11, 8},
+        ...     10: {11, 3},
+        ...     11: {7, 5},
+        ...     8: {7, 3},
+        ...     })))
         [3, 5, 7]
         [8, 11]
         [2, 9, 10]
@@ -93,39 +94,45 @@ class Spreadsheet(object):
             yield ordered
             data = {item: (dep - ordered) for item, dep in data.items()
                     if item not in ordered}
+
+        msg = "Cyclic dependencies exist among these items:\n\t{}"
         try:
-            assert not data, "Cyclic dependencies exist among these items:\n\t%s" % \
-                             '\n'.join(repr(x) for x in data.items())
+            assert not data, msg.format('\n\t'.join(repr(x) for x in data.items()))
         except AssertionError:
-            logger.debug("Found cycle in dependencies")
+            logger.debug(msg.format('\n\t'.join(repr(x) for x in data.items())))
 
     def find_divergence(self, wb):
         invalid_cells = []
-        for cell_names in self.sorted_cells:
+        level = 0
+        for level, cell_names in enumerate(self.sorted_cells):
             for cell_name in cell_names:
-                xlval = wb.excel.get_range(cell_name).value2
-                if not almost_equal(xlval, self.cellmap[cell_name].value):
-                    invalid_cells.append((cell_name, xlval, self.cellmap[cell_name].value))
+                xl_val = wb.excel.get_range(cell_name).value2
+                if not almost_equal(xl_val, self.cellmap[cell_name].value):
+                    invalid_cells.append((cell_name, xl_val, self.cellmap[cell_name].value))
             if invalid_cells:
                 break
-        return invalid_cells
+        if invalid_cells:
+            msg = "Divergence in {:d} calculation steps after constant declaration".format(level)
+        else:
+            msg = "No divergence between Excel and Python models"
+        return invalid_cells, msg
 
     def save_to_file(self, filename, protocol=2):
         with open(filename, 'wb') as fp:
             pickle.dump(self, fp, protocol=protocol)
 
     def export_to_dot(self, filename):
-        write_dot(self.G, filename)
+        write_dot(self.graph, filename)
 
     def export_to_gexf(self, filename):
-        write_gexf(self.G, filename)
+        write_gexf(self.graph, filename)
 
     def plot_graph(self, iterations=2000, show_arrows=True):
         if plt:
-            pos = spring_layout(self.G, iterations=iterations)
-            draw_networkx_nodes(self.G, pos)
-            draw_networkx_edges(self.G, pos, arrows=show_arrows)
-            draw_networkx_labels(self.G, pos)
+            pos = spring_layout(self.graph, iterations=iterations)
+            draw_networkx_nodes(self.graph, pos)
+            draw_networkx_edges(self.graph, pos, arrows=show_arrows)
+            draw_networkx_labels(self.graph, pos)
             plt.show()
         else:
             logger.error("Could not draw graph because matlplotlib could not be found!")
@@ -144,19 +151,17 @@ class Spreadsheet(object):
         if cell.value is None:
             return
         cell.value = None
-        map(self.reset, self.G.successors_iter(cell))
+        for descendant in descendants(self.graph, cell):
+            if isinstance(descendant, CellRange) or descendant.formula:
+                descendant.value = None
 
     def print_value_tree(self, addr, indent=2):
         cell = self.cellmap[addr]
         print("%s %s = %s" % (" "*indent, addr, cell.value))
-        for c in self.G.predecessors_iter(cell):
+        for c in self.graph.predecessors_iter(cell):
             self.print_value_tree(c.address(), indent+1)
 
-    def recalculate(self, reset=False):
-        if reset:
-            for cell in self.cellmap.values():
-                if isinstance(cell, CellRange) or cell.formula:
-                    cell.value = None
+    def recalculate(self):
         for cell in reversed(self.cellmap.values()):
             if isinstance(cell, CellRange):
                 self.evaluate_range(cell, is_addr=False)
@@ -530,7 +535,7 @@ def shunting_yard(expression):
         '<>': Operator('<>', 1, 'left'),
     }
 
-    output = collections.deque()
+    output = deque()
     stack = []
     were_values = []
     arg_count = []
@@ -616,7 +621,7 @@ def build_ast(expression):
     """Build an AST from an Excel formula expression in reverse polish notation."""
 
     # use a directed graph to store the tree
-    G = DiGraph()
+    graph = DiGraph()
 
     stack = []
 
@@ -627,27 +632,27 @@ def build_ast(expression):
             if n.ttype == "operator-infix":
                 arg2 = stack.pop()
                 arg1 = stack.pop()
-                G.add_node(arg1, {'pos': 1})
-                G.add_node(arg2, {'pos': 2})
-                G.add_edge(arg1, n)
-                G.add_edge(arg2, n)
+                graph.add_node(arg1, {'pos': 1})
+                graph.add_node(arg2, {'pos': 2})
+                graph.add_edge(arg1, n)
+                graph.add_edge(arg2, n)
             else:
                 arg1 = stack.pop()
-                G.add_node(arg1, {'pos': 1})
-                G.add_edge(arg1, n)
+                graph.add_node(arg1, {'pos': 1})
+                graph.add_edge(arg1, n)
 
         elif isinstance(n, FunctionNode):
             args = [stack.pop() for _ in range(n.num_args)]
             args.reverse()
             for i, a in enumerate(args):
-                G.add_node(a, {'pos': i})
-                G.add_edge(a, n)
+                graph.add_node(a, {'pos': i})
+                graph.add_edge(a, n)
         else:
-            G.add_node(n, {'pos': 0})
+            graph.add_node(n, {'pos': 0})
 
         stack.append(n)
 
-    return G, stack.pop()
+    return graph, stack.pop()
 
 
 class Context(object):
@@ -688,15 +693,18 @@ class ExcelCompiler(object):
             code = cell.value
         return code, ast
 
-    def add_node_to_graph(self, G, n):
-        G.add_node(n)
-        G.node[n]['sheet'] = n.sheet
+    def add_node_to_graph(self, graph, n):
+        graph.add_node(n)
+        graph.node[n]['sheet'] = n.sheet
 
         if isinstance(n, Cell):
-            G.node[n]['label'] = n.col + str(n.row)
+            graph.node[n]['label'] = n.col + str(n.row)
         else:
             # strip the sheet
-            G.node[n]['label'] = n.address()[n.address().find('!')+1:]
+            graph.node[n]['label'] = n.address()[n.address().find('!')+1:]
+
+    def make_python_model(self, seeds):
+        pass
 
     def gen_graph(self, seed, sheet=None):
         """
@@ -707,7 +715,7 @@ class ExcelCompiler(object):
         """
 
         # starting points
-        cursheet = sheet if sheet else self.excel.get_active_sheet()
+        cursheet = sheet if sheet is not None else self.excel.get_active_sheet()
         self.excel.set_sheet(cursheet)
 
         # no need to output nr and nc here, since seed can be a list of unlinked cells
@@ -719,7 +727,7 @@ class ExcelCompiler(object):
         # only keep seeds with formulas or numbers
         seeds = [s for s in seeds if s.formula or isinstance(s.value, number_types)]
 
-        logger.debug("%s filtered seeds " % len(seeds))
+        logger.debug("%s filtered seeds" % len(seeds))
 
         # cells to analyze: only formulas
         todo = [s for s in seeds if s.formula]
@@ -730,11 +738,11 @@ class ExcelCompiler(object):
         cellmap = OrderedDict([(x.address(), x) for x in seeds])
 
         # directed graph
-        G = DiGraph()
+        graph = DiGraph()
 
         # match the info in cellmap
-        for c in itervalues(cellmap):
-            self.add_node_to_graph(G, c)
+        for cell in itervalues(cellmap):
+            self.add_node_to_graph(graph, cell)
 
         while todo:
             c1 = todo.pop()
@@ -768,7 +776,7 @@ class ExcelCompiler(object):
                     if rng.address() in cellmap:
                         # already dealt with this range
                         # add an edge from the range to the parent
-                        G.add_edge(cellmap[rng.address()], cellmap[c1.address()])
+                        graph.add_edge(cellmap[rng.address()], cellmap[c1.address()])
                         continue
                     else:
                         # turn into cell objects
@@ -783,8 +791,8 @@ class ExcelCompiler(object):
                         # save the range
                         cellmap[rng.address()] = rng
                         # add an edge from the range to the parent
-                        self.add_node_to_graph(G, rng)
-                        G.add_edge(rng, cellmap[c1.address()])
+                        self.add_node_to_graph(graph, rng)
+                        graph.add_edge(rng, cellmap[c1.address()])
                         # cells in the range should point to the range as their parent
                         target = rng
                 else:
@@ -809,15 +817,16 @@ class ExcelCompiler(object):
                         # save in the cellmap
                         cellmap[c2.address()] = c2
                         # add to the graph
-                        self.add_node_to_graph(G, c2)
+                        self.add_node_to_graph(graph, c2)
 
                     # add an edge from the cell to the parent (range or cell)
-                    G.add_edge(cellmap[c2.address()], target)
+                    graph.add_edge(cellmap[c2.address()], target)
 
-        logger.info("Graph construction done, %s nodes, %s edges, %s cellmap entries" % (len(G.nodes()), len(G.edges()),
+        logger.info("Graph construction done, %s nodes, %s edges, %s cellmap entries" % (len(graph.nodes()),
+                                                                                         len(graph.edges()),
                                                                                          len(cellmap)))
 
-        sp = Spreadsheet(G=G, cellmap=cellmap, filename=self.filename)
+        sp = Spreadsheet(graph=graph, cellmap=cellmap, filename=self.filename)
 
         return sp
 
@@ -877,7 +886,7 @@ if __name__ == '__main__':
         e = shunting_yard(i)
         print("RPN: ",  "|".join([str(x) for x in e]))
 
-        G,root = build_ast(e)
+        graph, root = build_ast(e)
 
-        print("Python code: ", root.emit(G, context=None))
+        print("Python code: ", root.emit(graph, context=None))
         print("**************************************************")

@@ -1,15 +1,12 @@
-"""
-Simple Excel addin, requires www.pyxll.com
-"""
-
-from pyxll import xl_func, get_config, xl_macro, get_active_object
-from pyxll import xl_menu
+"""A simple Excel addin, requires www.pyxll.com"""
+from pyxll import xl_func, xl_menu, get_config, xl_macro, get_active_object
 import win32api
 import webbrowser
 import os
 import win32com.client
 from pycel.excelwrapper import ExcelComWrapper
 from pycel.excelcompiler import ExcelCompiler
+
 
 @xl_menu("Open log file", menu="PyXLL")
 def on_open_logfile():
@@ -19,10 +16,12 @@ def on_open_logfile():
         path = os.path.join(config.get("LOG", "path"), config.get("LOG", "file"))
         webbrowser.open("file://%s" % path)
 
+
 def xl_app():
     xl_window = get_active_object()
     xl_app = win32com.client.Dispatch(xl_window).Application
     return xl_app
+
 
 @xl_menu("Compile selection", menu="Pycel")
 def compile_selection_menu():
@@ -36,15 +35,19 @@ def compile_selection_menu():
         return
     
     res = win32api.MessageBox(0, "Going to compile %s to %s starting from %s" % (curfile,newfile,seed), "Pycel", 1)
-    if res == 2: return
+    if res == 2:
+        return
     
     sp = do_compilation(curfile, seed)
-    win32api.MessageBox(0, "Compilation done, graph has %s nodes and %s edges" % (len(sp.G.nodes()),len(sp.G.edges())) , "Pycel")
+    win32api.MessageBox(0, "Compilation done, graph has %s nodes and %s edges" % (len(sp.graph.nodes()),
+                                                                                  len(sp.graph.edges())),
+                        "Pycel")
 
-def do_compilation(fname,seed, sheet=None):
-    excel = ExcelComWrapper(fname,app=xl_app())
-    c = ExcelCompiler(filename=fname, excel=excel)
+
+def do_compilation(filename, seed, sheet=None):
+    excel = ExcelComWrapper(filename, app=xl_app())
+    c = ExcelCompiler(filename=filename, excel=excel)
     sp = c.gen_graph(seed, sheet=sheet)
-    sp.save_to_file(fname + ".pickle")
-    sp.export_to_gexf(fname + ".gexf")
+    sp.save_to_file(filename + ".pickle")
+    sp.export_to_gexf(filename + ".gexf")
     return sp

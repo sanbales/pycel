@@ -10,6 +10,9 @@ try:
 except ImportError:
     izip = zip
 
+__all__ = ('Cell', 'CellRange', 'almost_equal', 'flatten', 'is_range',
+           'list_types', 'number_types', 'split_address', 'split_range', 'uniqueify')
+
 
 number_types = (float, integer_types, Decimal)
 list_types = (list, tuple, ndarray, set)
