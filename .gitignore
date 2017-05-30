@@ -39,3 +39,6 @@ Thumbs.db
 *.pickle
 *.egg-info/
 .idea/
+.cache/
+~$*.xls*
+.coverage

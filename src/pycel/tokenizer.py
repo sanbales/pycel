@@ -463,52 +463,52 @@ class ExcelParser(ExcelParserTokens):
 
             tokens2.addRef(token);
 
-        # switch infix "-" operator to prefix when appropriate, switch infix "+" operator to noop when appropriate, identify operand
-        # and infix-operator subtypes, pull "@" from in front of function names
+        # switch infix "-" operator to prefix when appropriate,
+        # switch infix "+" operator to noop when appropriate,
+        # identify operand and infix-operator subtypes,
+        # pull "@" from in front of function names
         while (tokens2.moveNext()):
             token = tokens2.current()
-            if ((token.ttype == self.TOK_TYPE_OP_IN) and (token.tvalue == "-")):
-                if (tokens2.BOF()):
+            if all((token.ttype == self.TOK_TYPE_OP_IN, token.tvalue == "-")):
+                if tokens2.BOF():
                     token.ttype = self.TOK_TYPE_OP_PRE
                 elif (
-                   ((tokens2.previous().ttype == self.TOK_TYPE_FUNCTION) and (tokens2.previous().tsubtype == self.TOK_SUBTYPE_STOP)) or
-                   ((tokens2.previous().ttype == self.TOK_TYPE_SUBEXPR) and (tokens2.previous().tsubtype == self.TOK_SUBTYPE_STOP)) or
-                   (tokens2.previous().ttype == self.TOK_TYPE_OP_POST) or
-                   (tokens2.previous().ttype == self.TOK_TYPE_OPERAND)
-                  ):
-                    token.tsubtype = self.TOK_SUBTYPE_MATH;
+                   (tokens2.previous().ttype == self.TOK_TYPE_FUNCTION and tokens2.previous().tsubtype == self.TOK_SUBTYPE_STOP) or
+                   (tokens2.previous().ttype == self.TOK_TYPE_SUBEXPR and tokens2.previous().tsubtype == self.TOK_SUBTYPE_STOP) or
+                   tokens2.previous().ttype == self.TOK_TYPE_OP_POST or
+                   tokens2.previous().ttype == self.TOK_TYPE_OPERAND):
+                    token.tsubtype = self.TOK_SUBTYPE_MATH
                 else:
                     token.ttype = self.TOK_TYPE_OP_PRE
                 continue
 
-            if ((token.ttype == self.TOK_TYPE_OP_IN) and (token.tvalue == "+")):
-                if (tokens2.BOF()):
+            if token.ttype == self.TOK_TYPE_OP_IN and token.tvalue == "+":
+                if tokens2.BOF():
                     token.ttype = self.TOK_TYPE_NOOP
                 elif (
-                   ((tokens2.previous().ttype == self.TOK_TYPE_FUNCTION) and (tokens2.previous().tsubtype == self.TOK_SUBTYPE_STOP)) or
-                   ((tokens2.previous().ttype == self.TOK_TYPE_SUBEXPR) and (tokens2.previous().tsubtype == self.TOK_SUBTYPE_STOP)) or
-                   (tokens2.previous().ttype == self.TOK_TYPE_OP_POST) or
-                   (tokens2.previous().ttype == self.TOK_TYPE_OPERAND)
-                  ):
+                   (tokens2.previous().ttype == self.TOK_TYPE_FUNCTION and tokens2.previous().tsubtype == self.TOK_SUBTYPE_STOP) or
+                   (tokens2.previous().ttype == self.TOK_TYPE_SUBEXPR and tokens2.previous().tsubtype == self.TOK_SUBTYPE_STOP) or
+                   tokens2.previous().ttype == self.TOK_TYPE_OP_POST or
+                   tokens2.previous().ttype == self.TOK_TYPE_OPERAND):
                     token.tsubtype = self.TOK_SUBTYPE_MATH
                 else:
                     token.ttype = self.TOK_TYPE_NOOP
                 continue
 
-            if ((token.ttype == self.TOK_TYPE_OP_IN) and (len(token.tsubtype) == 0)):
-                if (("<>=").find(token.tvalue[0:1]) != -1):
+            if token.ttype == self.TOK_TYPE_OP_IN and len(token.tsubtype) == 0:
+                if ("<>=").find(token.tvalue[0:1]) != -1:
                     token.tsubtype = self.TOK_SUBTYPE_LOGICAL
-                elif (token.tvalue == "&"):
+                elif token.tvalue == "&":
                     token.tsubtype = self.TOK_SUBTYPE_CONCAT
                 else:
                     token.tsubtype = self.TOK_SUBTYPE_MATH
                 continue
 
-            if ((token.ttype == self.TOK_TYPE_OPERAND) and (len(token.tsubtype) == 0)):
+            if token.ttype == self.TOK_TYPE_OPERAND and len(token.tsubtype) == 0:
                 try:
                     float(token.tvalue)
                 except ValueError as e:
-                    if ((token.tvalue == 'TRUE') or (token.tvalue == 'FALSE')):
+                    if token.tvalue == 'TRUE' or token.tvalue == 'FALSE':
                         token.tsubtype = self.TOK_SUBTYPE_LOGICAL
                     else:
                         token.tsubtype = self.TOK_SUBTYPE_RANGE
@@ -516,17 +516,17 @@ class ExcelParser(ExcelParserTokens):
                     token.tsubtype = self.TOK_SUBTYPE_NUMBER
                 continue
 
-            if (token.ttype == self.TOK_TYPE_FUNCTION):
-                if (token.tvalue[0:1] == "@"):
+            if token.ttype == self.TOK_TYPE_FUNCTION:
+                if token.tvalue[0:1] == "@":
                     token.tvalue = token.tvalue[1:]
                 continue
 
-        tokens2.reset();
+        tokens2.reset()
 
         # move all tokens to a new collection, excluding all noops
         tokens = f_tokens()
-        while (tokens2.moveNext()):
-            if (tokens2.current().ttype != self.TOK_TYPE_NOOP):
+        while tokens2.moveNext():
+            if tokens2.current().ttype != self.TOK_TYPE_NOOP:
                 tokens.addRef(tokens2.current())
 
         tokens.reset()
@@ -539,15 +539,21 @@ class ExcelParser(ExcelParserTokens):
         output = ""
         if self.tokens:
             for t in self.tokens.items:
-                if   t.ttype == self.TOK_TYPE_FUNCTION and t.tsubtype == self.TOK_SUBTYPE_START:     output += t.tvalue + "("
-                elif t.ttype == self.TOK_TYPE_FUNCTION and t.tsubtype == self.TOK_SUBTYPE_STOP:      output += ")"
-                elif t.ttype == self.TOK_TYPE_SUBEXPR  and t.tsubtype == self.TOK_SUBTYPE_START:     output += "("
-                elif t.ttype == self.TOK_TYPE_SUBEXPR  and t.tsubtype == self.TOK_SUBTYPE_STOP:      output += ")"
+                if t.ttype == self.TOK_TYPE_FUNCTION and t.tsubtype == self.TOK_SUBTYPE_START:
+                    output += t.tvalue + "("
+                elif t.ttype == self.TOK_TYPE_FUNCTION and t.tsubtype == self.TOK_SUBTYPE_STOP:
+                    output += ")"
+                elif t.ttype == self.TOK_TYPE_SUBEXPR  and t.tsubtype == self.TOK_SUBTYPE_START:
+                    output += "("
+                elif t.ttype == self.TOK_TYPE_SUBEXPR  and t.tsubtype == self.TOK_SUBTYPE_STOP:
+                    output += ")"
                 # TODO: add in RE substitution of " with "" for strings
-                elif t.ttype == self.TOK_TYPE_OPERAND  and t.tsubtype == self.TOK_SUBTYPE_TEXT:      output += "\"" + t.tvalue + "\""
-                elif t.ttype == self.TOK_TYPE_OP_IN    and t.tsubtype == self.TOK_SUBTYPE_INTERSECT: output += " "
-
-                else: output += t.tvalue
+                elif t.ttype == self.TOK_TYPE_OPERAND  and t.tsubtype == self.TOK_SUBTYPE_TEXT:
+                    output += "\"" + t.tvalue + "\""
+                elif t.ttype == self.TOK_TYPE_OP_IN    and t.tsubtype == self.TOK_SUBTYPE_INTERSECT:
+                    output += " "
+                else:
+                    output += t.tvalue
         return output
 
     def prettyprint(self):
@@ -555,49 +561,59 @@ class ExcelParser(ExcelParserTokens):
         output = ""
         if self.tokens:
             for t in self.tokens.items:
-                if (t.tsubtype == self.TOK_SUBTYPE_STOP):
+                if t.tsubtype == self.TOK_SUBTYPE_STOP:
                     indent -= 1
 
                 output += "    "*indent + t.tvalue + " <" + t.ttype +"> <" + t.tsubtype + ">" + "\n"
 
-                if (t.tsubtype == self.TOK_SUBTYPE_START):
-                    indent += 1;
+                if t.tsubtype == self.TOK_SUBTYPE_START:
+                    indent += 1
         return output
 
+
 class Operator:
-    def __init__(self,value,precedence,associativity):
+    def __init__(self, value, precedence, associativity):
         self.value = value
         self.precedence = precedence
         self.associativity = associativity
 
+
 class ASTNode(object):
-    def __init__(self,token):
-        super(ASTNode,self).__init__()
+    def __init__(self, token):
+        super(ASTNode, self).__init__()
         self.token = token
+
     def emit(self):
         self.token.tvalue
+
     def __str__(self):
         return self.token.tvalue
 
+
 class OperatorNode(ASTNode):
-    def __init__(self,*args):
-        super(OperatorNode,self).__init__(*args)
+    def __init__(self, *args):
+        super(OperatorNode, self).__init__(*args)
+
     def emit(self):
         pass
+
 
 class RangeNode(ASTNode):
-    def __init__(self,*args):
-        super(RangeNode,self).__init__(*args)
+    def __init__(self, *args):
+        super(RangeNode, self).__init__(*args)
+
     def emit(self):
         pass
 
+
 class FunctionNode(ASTNode):
-    def __init__(self,*args):
-        super(FunctionNode,self).__init__(*args)
+    def __init__(self, *args):
+        super(FunctionNode, self).__init__(*args)
         self.num_args = 0
 
     def emit(self):
         pass
+
 
 def create_node(t):
     if t.ttype == "operand" and t.tsubtype == "range":
@@ -609,13 +625,13 @@ def create_node(t):
     else:
         return ASTNode(t)
 
-def shunting_yard(expression):
 
+def shunting_yard(expression):
     #remove leading =
     if expression.startswith('='):
         expression = expression[1:]
 
-    p = ExcelParser();
+    p = ExcelParser()
     p.parse(expression)
 
     # insert tokens for '(' and ')', to make things cleaner below
@@ -624,11 +640,9 @@ def shunting_yard(expression):
         if t.ttype == "function" and t.tsubtype == "start":
             t.tsubtype = ""
             tokens.append(t)
-            tokens.append(f_token('(','arglist','start'))
+            tokens.append(f_token('(', 'arglist', 'start'))
         elif t.ttype == "function" and t.tsubtype == "stop":
-            #t.tsubtype = ""
-            #tokens.append(t)
-            tokens.append(f_token(')','arglist','stop'))
+            tokens.append(f_token(')', 'arglist', 'stop'))
         elif t.ttype == "subexpression" and t.tsubtype == "start":
             t.tvalue = '('
             tokens.append(t)
@@ -645,7 +659,7 @@ def shunting_yard(expression):
     operators[':'] = Operator(':',8,'left')
     operators[''] = Operator(' ',8,'left')
     operators[','] = Operator(',',8,'left')
-    operators['u-'] = Operator('u-',7,'left') #unary negation
+    operators['u-'] = Operator('u-',7,'left')  # unary negation
     operators['%'] = Operator('%',6,'left')
     operators['^'] = Operator('^',5,'left')
     operators['*'] = Operator('*',4,'left')

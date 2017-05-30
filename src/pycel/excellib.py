@@ -1,28 +1,15 @@
-'''
-Python equivalents of various excel functions
-'''
+"""Python equivalents of various excel functions."""
 from __future__ import division
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from logging import getLogger
-from math import log
-import numpy as np
-import re
-from six import string_types, integer_types
-from pycel.excelutil import (
-    flatten,
-    split_address,
-    col2num,
-    index2addres,
-    is_number,
-    date_from_int,
-    normalize_year,
-    is_leap_year,
-    get_max_days_in_month,
-    find_corresponding_index
-)
+import math
+from numpy import linalg, vander, zeros
+from pycel.excelutil import (date_from_int, find_corresponding_index, flatten,
+                             integer_types, is_leap_year, is_number, list_types,
+                             normalize_year, number_types, string_types)
 
-######################################################################################
+
 # A dictionary that maps excel function names onto python equivalents. You should
 # only add an entry to this map if the python name is different to the excel name
 # (which it may need to be to  prevent conflicts with existing python functions
@@ -34,43 +21,88 @@ from pycel.excelutil import (
 
 # Note: some functions (if, pi, atan2, and, or, array, ...) are already taken care of
 # in the FunctionNode code, so adding them here will have no effect.
-FUNCTION_MAP = {
-      "ln": "xlog",
-      "min": "xmin",
-      "min": "xmin",
-      "max": "xmax",
-      "sum": "xsum",
-      "gammaln": "lgamma",
-      "round": "xround"
-      }
 
-number_types = (float, integer_types, Decimal)
-list_types = (list, tuple, np.ndarray, set)
+FUNCTION_MAP = {
+    'log': 'xl_log',
+    "min": "xl_min",
+    "max": "xl_max",
+    "sum": "xl_sum",
+    "round": "xl_round"
+}
 
 logger = getLogger(__name__)
 
-######################################################################################
-# List of excel equivalent functions
-# TODO: needs unit testing
+# TODO: add tests for the functions in this module
 
 
 def value(text):
-    # make the distinction for naca numbers
-    if text.find('.') > 0:
-        return float(text)
-    else:
+    """
+    Converts a text string that represents a number to a number.
+
+    :param text: string input to be converted to a numerical value
+    :return: a numerical value
+
+    """
+    try:
         return int(text)
+    except ValueError:
+        return float(text)
 
 
-def xlog(a):
-    if isinstance(a, list_types):
-        return [log(x) for x in flatten(a)]
+def ln(number):
+    """
+    Returns the natural logarithm of a number.
+    Natural logarithms are based on the constant e (2.71828182845904).
+
+    :param number: Required. The positive real number for which you want the natural logarithm.
+    :return: the natural logarithm of the number.
+
+    """
+
+    if isinstance(number, list_types):
+        return [math.log(x) for x in flatten(number)]
     else:
-        return log(a)
+        return math.log(number)
 
 
-def xmax(*args):
-    # ignore non numeric cells
+def xl_log(number, base=10):
+    """
+    Returns the logarithm of a number to the base you specify.
+
+    :param number: Required. The positive real number for which you want the logarithm.
+    :param base: Optional. The base of the logarithm. If base is omitted, it is assumed to be 10.
+    :return: the logarithm of the number.
+
+    """
+
+    if isinstance(number, list_types):
+        return [math.log(item, base) for item in flatten(number)]
+    else:
+        return math.log(number, base)
+
+
+def xl_max(*args):
+    """
+    Returns the largest value in a set of values.
+
+    :param args: items to find the largest number in.
+    :return: largest number.
+
+    .. remarks::
+
+        * Arguments can either be numbers or names, arrays, or references that contain numbers.
+        * Logical values and text representations of numbers that you type directly into the list
+        of arguments are counted.
+        * If an argument is an array or reference, only numbers in that array or reference are used.
+        Empty cells, logical values, or text in the array or reference are ignored.
+        * If the arguments contain no numbers, MAX returns 0 (zero).
+        * Arguments that are error values or text that cannot be translated into numbers cause errors.
+        * If you want to include logical values and text representations of numbers in a reference as
+        part of the calculation, use the MAXA function.
+
+    """
+
+    # ignore non-numeric cells
     data = [x for x in flatten(args) if isinstance(x, number_types)]
 
     # however, if no non numeric cells, return zero (is what excel does)
@@ -80,7 +112,26 @@ def xmax(*args):
         return max(data)
 
 
-def xmin(*args):
+def xl_min(*args):
+    """
+    Returns the smallest number in a set of values.
+
+    :param args: items to find the smallest number in.
+    :return: smallest number.
+
+    .. remarks::
+        * Arguments can either be numbers or names, arrays, or references that contain numbers.
+        * Logical values and text representations of numbers that you type directly into the list
+        of arguments are counted.
+        * If an argument is an array or reference, only numbers in that array or reference are used.
+        Empty cells, logical values, or text in the array or reference are ignored.
+        * If the arguments contain no numbers, MIN returns 0.
+        * Arguments that are error values or text that cannot be translated into numbers cause errors.
+        * If you want to include logical values and text representations of numbers in a reference as
+        part of the calculation, use the MINA function.
+
+    """
+
     # ignore non numeric cells
     data = [x for x in flatten(args) if isinstance(x, number_types)]
 
@@ -91,7 +142,7 @@ def xmin(*args):
         return min(data)
 
 
-def xsum(*args):
+def xl_sum(*args):
     # ignore non numeric cells
     data = [x for x in flatten(args) if isinstance(x, number_types)]
 
@@ -102,28 +153,49 @@ def xsum(*args):
         return sum(data)
 
 
-def sumif(range, criteria, sum_range=[]): # Excel reference: https://support.office.com/en-us/article/SUMIF-function-169b8c99-c05c-4483-a712-1697a653039b
+def sumif(rng, criteria, sum_range=None):
+    """
+    You use the SUMIF function to sum the values in a range that meet criteria that you specify.
+    For example, suppose that in a column that contains numbers, you want to sum only the values
+    that are larger than 5. You can use the following formula: =SUMIF(B2:B25,">5")
+
+    :param rng: Required. The range of cells that you want evaluated by criteria. Cells in each
+        range must be numbers or names, arrays, or references that contain numbers. Blank and
+        text values are ignored. The selected range may contain dates in standard Excel format.
+    :param criteria: Required. The criteria in the form of a number, expression, a cell reference,
+        text, or a function that defines which cells will be added. For example, criteria can be
+        expressed as 32, ">32", B5, "32", "apples", or TODAY().
+    :param sum_range:  Optional. The actual cells to add, if you want to add cells other than those
+        specified in the range argument. If the sum_range argument is omitted, Excel adds the cells
+        that are specified in the range argument (the same cells to which the criteria is applied).
+    :return: the total sum of the elements that meet the criteria.
+
+    .. reference::
+        https://support.office.com/en-us/article/SUMIF-function-169b8c99-c05c-4483-a712-1697a653039b
+    """
 
     # WARNING:
     # - wildcards not supported
     # - doesn't really follow 2nd remark about sum_range length
 
-    if type(range) != list:
-        raise TypeError('%s must be a list' % str(range))
+    sum_range = sum_range or rng
+
+    if type(rng) != list:
+        raise TypeError('%s must be a list' % str(rng))
 
     if type(sum_range) != list:
         raise TypeError('%s must be a list' % str(sum_range))
 
-    if isinstance(criteria, list) and not isinstance(criteria , (str, bool)): # ugly...
+    if isinstance(criteria, list_types) and not isinstance(criteria, (string_types, bool)):
         return 0
 
-    indexes = find_corresponding_index(range, criteria)
+    indexes = find_corresponding_index(rng, criteria)
 
     def f(x):
         return sum_range[x] if x < len(sum_range) else 0
 
     if len(sum_range) == 0:
-        return sum(map(lambda x: range[x], indexes))
+        return sum(map(lambda x: rng[x], indexes))
     else:
         return sum(map(f, indexes))
 
@@ -134,7 +206,7 @@ def average(*args):
 
 
 def right(text, n):
-    #TODO: hack to deal with naca section numbers
+    # NOTE: hack to deal with NACA section numbers
     if isinstance(text, string_types):
         return text[-n:]
     else:
@@ -151,53 +223,77 @@ def index(*args):
     else:
         col = 1
 
-    if isinstance(array[0],(list,tuple,np.ndarray)):
+    if isinstance(array[0], list_types):
         # rectangular array
+        # TODO: figure out what is going on here
         array[row-1][col-1]
     elif row == 1 or col == 1:
         return array[row-1] if col == 1 else array[col-1]
     else:
-        raise Exception("index (%s,%s) out of range for %s" %(row,col,array))
+        raise IndexError("index (%s,%s) out of range for %s" %(row,col,array))
 
 
-def lookup(value, lookup_range, result_range):
-    # TODO
-    if not isinstance(value, number_types):
-        raise Exception("Non numeric lookups (%s) not supported" % value)
+def lookup(lookup_value, lookup_vector, result_vector=None):
+    # TODO: add non-numeric lookup functionality
+    if not isinstance(lookup_value, number_types):
+        raise IndexError("Non-numeric lookups (%s) are not supported" % lookup_value)
 
-    # TODO: note, may return the last equal value
+    # TODO: note, may return the last equal lookup_value
 
-    # index of the last numeric value
+    # index of the last numeric lookup_value
     lastnum = -1
-    for i, v in enumerate(lookup_range):
-        if isinstance(v,number_types):
-            if v > value:
+    i = 0
+    for i, v in enumerate(lookup_vector):
+        if isinstance(v, number_types):
+            if v > lookup_value:
                 break
             else:
                 lastnum = i
 
+    result_vector = result_vector or lookup_vector
+
     if lastnum < 0:
-        raise Exception("No numeric data found in the lookup range")
+        raise IndexError("No numeric data found in the lookup range")
     else:
         if i == 0:
-            raise Exception("All values in the lookup range are bigger than %s" % value)
+            raise IndexError("All values in the lookup range are bigger than %s" % lookup_value)
         else:
-            if i >= len(lookup_range)-1:
-                # return the biggest number smaller than value
-                return result_range[lastnum]
+            if i >= len(lookup_vector)-1:
+                # return the biggest number smaller than lookup_value
+                return result_vector[lastnum]
             else:
-                return result_range[i-1]
+                return result_vector[i-1]
 
 
 def vlookup(lookup_value, table_array, col_index_num, range_lookup=True):
+    """
+    Use VLOOKUP, one of the lookup and reference functions, when you need to find
+    things in a table or a range by row. For example, look up a price of an
+    automotive part by the part number.
+
+    In its simplest form, the VLOOKUP function says:
+
+    =VLOOKUP(Value you want to look up, range where you want to lookup the value,
+        the column number in the range containing the return value,
+        Exact Match or Approximate Match – indicated as 0/FALSE or 1/TRUE).
+
+    :param lookup_value:
+    :param table_array:
+    :param col_index_num:
+    :param range_lookup:
+    :return:
+
+    """
+
     if range_lookup:
         if not isinstance(lookup_value, number_types):
             raise ValueError("Can only do approximate VLOOKUPS with numbers")
+        idx = -1
         for idx in range(len(table_array) - 1):
-            if (table_array[idx][0] <= lookup_value and
-                table_array[idx + 1][0] > lookup_value):
+            if all((table_array[idx][0] <= lookup_value,
+                    table_array[idx + 1][0] > lookup_value)):
                 return table_array[idx][col_index_num - 1]
-        return table_array[idx + 1][col_index_num - 1]
+        return table_array[idx+1][col_index_num - 1]
     else:
         values = [row[0] for row in table_array]
         if lookup_value in values:
@@ -206,60 +302,96 @@ def vlookup(lookup_value, table_array, col_index_num, range_lookup=True):
 
 
 def linest(*args, **kwargs):
-    Y = args[0]
-    X = args[1]
+    y = args[0]
+    x = args[1]
 
     if len(args) == 3:
         const = args[2]
-        if isinstance(const,str):
+        if isinstance(const, string_types):
             const = (const.lower() == "true")
     else:
         const = True
 
-    degree = kwargs.get('degree',1)
+    degree = kwargs.get('degree', 1)
 
-    # build the vandermonde matrix
-    A = np.vander(X, degree+1)
+    # build the Vandermonde matrix
+    a = vander(x, degree + 1)
 
     if not const:
         # force the intercept to zero
-        A[:,-1] = np.zeros((1,len(X)))
+        a[:, -1] = zeros((1, len(x)))
 
     # perform the fit
-    (coefs, residuals, rank, sing_vals) = np.linalg.lstsq(A, Y)
+    coeffs, residuals, rank, sing_vals = linalg.lstsq(a, y)
 
-    return coefs
+    return coeffs
 
 
 def npv(*args):
     discount_rate = args[0]
     cashflow = args[1]
-    return sum([float(x)*(1+discount_rate)**-(i+1) for (i,x) in enumerate(cashflow)])
+    return sum([float(x)*(1+discount_rate)**-(i+1) for (i, x) in enumerate(cashflow)])
 
 
 def match(lookup_value, lookup_array, match_type=1):
-    def type_convert(value):
-        if type(value) == str:
-            value = value.lower()
-        elif type(value) == int:
-            value = float(value)
-        return value;
+    """
+    The MATCH function searches for a specified item in a range of cells,
+    and then returns the relative position of that item in the range.
+    For example, if the range A1:A3 contains the values 5, 25, and 38,
+    then the formula =MATCH(25,A1:A3,0) returns the number 2, because 25
+    is the second item in the range.
+
+    :param lookup_value: Required. The value that you want to match in lookup_array.
+        For example, when you look up someone's number in a telephone book, you are
+        using the person's name as the lookup value, but the telephone number is
+        the value you want.
+
+        The lookup_value argument can be a value (number, text, or logical value)
+        or a cell reference to a number, text, or logical value.
+
+    :param lookup_array: Required. The range of cells being searched.
+    :param match_type: Optional. The number -1, 0, or 1. The match_type argument
+        specifies how Excel matches lookup_value with values in lookup_array.
+        The default value for this argument is 1.
+
+    :return: The index of the first instance of lookup_value in lookup_array.
+
+    ..remarks::
+        * MATCH returns the position of the matched value within lookup_array, not
+            the value itself. For example, MATCH("b",{"a","b","c"},0) returns 2,
+            which is the relative position of "b" within the array {"a","b","c"}.
+        * MATCH does not distinguish between uppercase and lowercase letters when matching text values.
+        * If MATCH is unsuccessful in finding a match, it returns the #N/A error value.
+        * If match_type is 0 and lookup_value is a text string, you can use the
+            wildcard characters — the question mark (?) and asterisk (*) — in the
+            lookup_value argument. A question mark matches any single character;
+            an asterisk matches any sequence of characters. If you want to find an
+            actual question mark or asterisk, type a tilde (~) before the character.
+
+    """
+
+    def type_convert(val):
+        if isinstance(val, string_types):
+            val = val.lower()
+        elif isinstance(val, number_types):
+            val = float(val)
+        return val
 
     lookup_value = type_convert(lookup_value)
 
     if match_type == 1:
         # Verify ascending sort
-        posMax = -1
+        pos_max = -1
         for i in range((len(lookup_array))):
             current = type_convert(lookup_array[i])
-
             if i is not len(lookup_array)-1 and current > type_convert(lookup_array[i+1]):
-                raise Exception('for match_type 0, lookup_array must be sorted ascending')
+                raise ValueError('for match_type 0, lookup_array must be sorted ascending')
             if current <= lookup_value:
-                posMax = i
-        if posMax == -1:
-            raise ('no result in lookup_array for match_type 0')
-        return posMax +1 #Excel starts at 1
+                pos_max = i
+        if pos_max == -1:
+            raise ValueError('No result in lookup_array for match_type 0')
+        # Excel starts at 1
+        return pos_max + 1
 
     elif match_type == 0:
         # No string wildcard
@@ -267,54 +399,110 @@ def match(lookup_value, lookup_array, match_type=1):
 
     elif match_type == -1:
         # Verify descending sort
-        posMin = -1
+        pos_min = -1
         for i in range((len(lookup_array))):
             current = type_convert(lookup_array[i])
-
             if i is not len(lookup_array)-1 and current < type_convert(lookup_array[i+1]):
-               raise ('for match_type 0, lookup_array must be sorted descending')
+                raise ValueError('For match_type 0, lookup_array must be sorted descending')
             if current >= lookup_value:
-               posMin = i
-        if posMin == -1:
+                pos_min = i
+        if pos_min == -1:
             raise Exception('no result in lookup_array for match_type 0')
-        return posMin +1 #Excel starts at 1
+        # Excel starts at 1
+        return pos_min + 1
 
 
-def mod(nb, q): # Excel Reference: https://support.office.com/en-us/article/MOD-function-9b6cd169-b6ee-406a-a97b-edf2a9dc24f3
-    if not isinstance(nb, (integer_types)):
-        raise TypeError("%s is not an integer" % str(nb))
-    elif not isinstance(q, (integer_types)):
-        raise TypeError("%s is not an integer" % str(q))
+def mod(number, divisor):
+    """
+    Returns the remainder after number is divided by divisor. The result has the same sign as divisor.
+
+    :param number: Required. The number for which you want to find the remainder.
+    :param divisor: Required. The number by which you want to divide number.
+    :return: the remainder of dividing the `number` by the `divisor`.
+
+    .. reference::
+        https://support.office.com/en-us/article/MOD-function-9b6cd169-b6ee-406a-a97b-edf2a9dc24f3
+
+    .. remarks::
+        * If divisor is 0, MOD returns the #DIV/0! error value.
+        * The MOD function can be expressed in terms of the INT function:
+            * MOD(n, d) = n - d*INT(n/d)
+
+    """
+
+    if not isinstance(number, integer_types):
+        raise TypeError("'{}' is not an integer".format(number))
+    elif not isinstance(divisor, integer_types):
+        raise TypeError("'{}' is not an integer".format(divisor))
+    elif divisor == 0:
+        raise ZeroDivisionError("Can't return remainder of '{}'".format(number))
     else:
-        return nb % q
+        return number % divisor
 
 
-def count(*args): # Excel reference: https://support.office.com/en-us/article/COUNT-function-a59cd7fc-b623-4d93-87a4-d23bf411294c
+def count(*args):
+    """
+
+    :param args:
+    :return:
+
+    .. reference::
+        https://support.office.com/en-us/article/COUNT-function-a59cd7fc-b623-4d93-87a4-d23bf411294c
+    """
+
     l = list(args)
 
     total = 0
 
     for arg in l:
-        if type(arg) == list:
-            total += len(filter(lambda x: is_number(x) and type(x) is not bool, arg)) # count inside a list
-        elif is_number(arg): # int() is used for text representation of numbers
+        if isinstance(arg, list_types):
+            # count inside a list
+            total += len(list(filter(lambda x: is_number(x) and type(x) is not bool, arg)))
+        # int() is used for text representation of numbers
+        elif is_number(arg):
             total += 1
 
     return total
 
 
-def countif(range, criteria): # Excel reference: https://support.office.com/en-us/article/COUNTIF-function-e0de10c6-f885-4e71-abb4-1f464816df34
+def countif(rng, criteria):
+    """
+    Use COUNTIF, one of the statistical functions, to count the number of cells
+    that meet a criterion; for example, to count the number of times a
+    particular city appears in a customer list.
 
-    # WARNING:
-    # - wildcards not supported
-    # - support of strings with >, <, <=, =>, <> not provided
+    In its simplest form, COUNTIF says:
 
-    valid = find_corresponding_index(range, criteria)
+    =COUNTIF(Where do you want to look?, What do you want to look for?)
+
+    :param rng:
+    :param criteria:
+    :return:
+
+    .. reference::
+        https://support.office.com/en-us/article/COUNTIF-function-e0de10c6-f885-4e71-abb4-1f464816df34
+
+    .. warning:
+        wildcards are not supported.
+
+    """
+
+    valid = find_corresponding_index(rng, criteria)
 
     return len(valid)
 
 
-def countifs(*args): # Excel reference: https://support.office.com/en-us/article/COUNTIFS-function-dda3dc6e-f74e-4aee-88bc-aa8c2a866842
+def countifs(*args):
+    """
+    The COUNTIFS function applies criteria to cells across multiple ranges and
+    counts the number of times all criteria are met.
+
+    :param args:
+    :return:
+
+    .. reference::
+        https://support.office.com/en-us/article/COUNTIFS-function-dda3dc6e-f74e-4aee-88bc-aa8c2a866842
+    """
 
     arg_list = list(args)
     l = len(arg_list)
@@ -322,51 +510,89 @@ def countifs(*args): # Excel reference: https://support.office.com/en-us/article
     if l % 2 != 0:
         raise Exception('excellib.countifs() must have a pair number of arguments, here %d' % l)
 
-
     if l >= 2:
-        indexes = find_corresponding_index(args[0], args[1]) # find indexes that match first layer of countif
+        # find indexes that match first layer of countif
+        indexes = find_corresponding_index(args[0], args[1])
 
-        remaining_ranges = [elem for i, elem in enumerate(arg_list[2:]) if i % 2 == 0] # get only ranges
-        remaining_criteria = [elem for i, elem in enumerate(arg_list[2:]) if i % 2 == 1] # get only criteria
+        # get only ranges
+        remaining_ranges = [elem for i, elem in enumerate(arg_list[2:]) if i % 2 == 0]
+        # get only criteria
+        remaining_criteria = [elem for i, elem in enumerate(arg_list[2:]) if i % 2 == 1]
 
         filtered_remaining_ranges = []
 
-        for range in remaining_ranges: # filter items in remaining_ranges that match valid indexes from first countif layer
+        # filter items in remaining_ranges that match valid indexes from first countif layer
+        for rng in remaining_ranges:
             filtered_remaining_range = []
 
-            for index, item in enumerate(range):
-                if index in indexes:
+            for idx, item in enumerate(rng):
+                if idx in indexes:
                     filtered_remaining_range.append(item)
 
             filtered_remaining_ranges.append(filtered_remaining_range)
 
         new_tuple = ()
 
-        for index, range in enumerate(filtered_remaining_ranges): # rebuild the tuple that will be the argument of next layer
-            new_tuple += (range, remaining_criteria[index])
+        # rebuild the tuple that will be the argument of next layer
+        for idx, rng in enumerate(filtered_remaining_ranges):
+            new_tuple += (rng, remaining_criteria[idx])
 
-        return min(countifs(*new_tuple), len(indexes)) # only consider the minimum number across all layer responses
+        # only consider the minimum number across all layer responses
+        return min(countifs(*new_tuple), len(indexes))
 
     else:
         return float('inf')
 
 
 def roundup(number, num_digits=0):
-    """Rounds a number up, away from 0 (zero)."""
+    """
+    Rounds a number up, away from 0 (zero).
+
+    :param number: Required. Any real number that you want rounded up.
+    :param num_digits: Required. The number of digits to which you want to round number.
+    :return: the rounded number.
+
+    """
     new = round(number, num_digits)
     new += 10 ** -num_digits if number > new else 0
     return round(new, num_digits)
 
 
-def xround(number, num_digits=0):
-# Excel reference: https://support.office.com/en-us/article/ROUND-function-c018c5d8-40fb-4053-90b1-b3e7f61a213c
+def xl_round(number, num_digits=0):
+    """
+    The ROUND function rounds a number to a specified number of digits. For example,
+    if cell A1 contains 23.7825, and you want to round that value to two decimal places,
+    you can use the following formula:
+
+    =ROUND(A1, 2)
+
+    The result of this function is 23.78.
+
+    :param number: Required. The number that you want to round.
+    :param num_digits: Required. The number of digits to which you want to round the number argument.
+    :return: the rounded number
+
+    .. remarks::
+
+        * If num_digits is greater than 0 (zero), then number is rounded to the specified number of decimal places.
+        * If num_digits is 0, the number is rounded to the nearest integer.
+        * If num_digits is less than 0, the number is rounded to the left of the decimal point.
+        * To always round up (away from zero), use the ROUNDUP function.
+        * To always round down (toward zero), use the ROUNDDOWN function.
+        * To round a number to a specific multiple (for example, to round to the nearest 0.5), use the MROUND function.
+
+    .. reference::
+        https://support.office.com/en-us/article/ROUND-function-c018c5d8-40fb-4053-90b1-b3e7f61a213c
+
+    """
 
     if not is_number(number):
         raise TypeError("%s is not a number" % str(number))
     if not is_number(num_digits):
         raise TypeError("%s is not a number" % str(num_digits))
 
-    if num_digits >= 0: # round to the right side of the point
+    # round to the right side of the point
+    if num_digits >= 0:
         return float(Decimal(repr(number)).quantize(Decimal(repr(pow(10, -num_digits))), rounding=ROUND_HALF_UP))
         # see https://docs.python.org/2/library/functions.html#round
         # and https://gist.github.com/ejamesc/cedc886c5f36e2d075c5
@@ -374,7 +600,17 @@ def xround(number, num_digits=0):
         return round(number, num_digits)
 
 
-def mid(text, start_num, num_chars): # Excel reference: https://support.office.com/en-us/article/MID-MIDB-functions-d5f9e25c-d7d6-472e-b568-4ecb12433028
+def mid(text, start_num, num_chars):
+    """
+
+    :param text:
+    :param start_num:
+    :param num_chars:
+    :return:
+
+    .. reference::
+        https://support.office.com/en-us/article/MID-MIDB-functions-d5f9e25c-d7d6-472e-b568-4ecb12433028
+    """
 
     text = str(text)
 
@@ -391,7 +627,17 @@ def mid(text, start_num, num_chars): # Excel reference: https://support.office.c
     return text[start_num:num_chars]
 
 
-def date(year, month, day): # Excel reference: https://support.office.com/en-us/article/DATE-function-e36c0c8c-4104-49da-ab83-82328b832349
+def date(year, month, day):
+    """
+
+    :param year:
+    :param month:
+    :param day:
+    :return:
+    .. reference::
+        https://support.office.com/en-us/article/DATE-function-e36c0c8c-4104-49da-ab83-82328b832349
+
+    """
 
     if type(year) != int:
         raise TypeError("%s is not an integer" % str(year))
@@ -406,14 +652,14 @@ def date(year, month, day): # Excel reference: https://support.office.com/en-us/
         raise ValueError("Year must be between 1 and 9999, instead %s" % str(year))
 
     if year < 1900:
-        year = 1900 + year
+        year += 1900
 
     year, month, day = normalize_year(year, month, day) # taking into account negative month and day values
 
     date_0 = datetime(1900, 1, 1)
     date = datetime(year, month, day)
 
-    result = (datetime(year, month, day) - date_0).days + 2
+    result = (date - date_0).days + 2
 
     if result <= 0:
         raise ArithmeticError("Date result is negative")
@@ -421,7 +667,17 @@ def date(year, month, day): # Excel reference: https://support.office.com/en-us/
         return result
 
 
-def yearfrac(start_date, end_date, basis = 0): # Excel reference: https://support.office.com/en-us/article/YEARFRAC-function-3844141e-c76d-4143-82b6-208454ddc6a8
+def yearfrac(start_date, end_date, basis=0):
+    """
+
+    :param start_date:
+    :param end_date:
+    :param basis:
+    :return:
+
+    .. reference::
+        https://support.office.com/en-us/article/YEARFRAC-function-3844141e-c76d-4143-82b6-208454ddc6a8
+    """
 
     def actual_nb_days_ISDA(start, end): # needed to separate days_in_leap_year from days_not_leap_year
         y1, m1, d1 = start
@@ -448,7 +704,7 @@ def yearfrac(start_date, end_date, basis = 0): # Excel reference: https://suppor
             else:
                 days_not_in_leap_year += nb_days
 
-        return (days_not_in_leap_year, days_in_leap_year)
+        return days_not_in_leap_year, days_in_leap_year
 
     def actual_nb_days_AFB_alter(start, end):
         """
@@ -489,7 +745,8 @@ def yearfrac(start_date, end_date, basis = 0): # Excel reference: https://suppor
     if end_date < 0:
         raise ValueError("end_date %s must be positive" % str(end_date))
 
-    if start_date > end_date: # switch dates if start_date > end_date
+    # switch dates if start_date > end_date
+    if start_date > end_date:
         temp = end_date
         end_date = start_date
         start_date = temp
@@ -497,28 +754,32 @@ def yearfrac(start_date, end_date, basis = 0): # Excel reference: https://suppor
     y1, m1, d1 = date_from_int(start_date)
     y2, m2, d2 = date_from_int(end_date)
 
-    if basis == 0: # US 30/360
+    # US 30/360
+    if basis == 0:
         d2 = 30 if d2 == 31 and (d1 == 31 or d1 == 30) else min(d2, 31)
         d1 = 30 if d1 == 31 else d1
 
         count = 360 * (y2 - y1) + 30 * (m2 - m1) + (d2 - d1)
         result = count / 360
 
-    elif basis == 1: # Actual/actual
+    # Actual/actual
+    elif basis == 1:
         result = actual_nb_days_AFB_alter((y1, m1, d1), (y2, m2, d2))
 
-    elif basis == 2: # Actual/360
+    # Actual/360
+    elif basis == 2:
         result = (end_date - start_date) / 360
 
-    elif basis == 3: # Actual/365
+    # Actual/365
+    elif basis == 3:
         result = (end_date - start_date) / 365
 
-    elif basis == 4: # Eurobond 30/360
+    # Eurobond 30/360
+    elif basis == 4:
         d2 = 30 if d2 == 31 else d2
         d1 = 30 if d1 == 31 else d1
 
-        count = 360 * (y2 - y1) + 30 * (m2 - m1) + (d2 - d1)
-        result = count / 360
+        result = (360 * (y2 - y1) + 30 * (m2 - m1) + (d2 - d1)) / 360
 
     else:
         raise ValueError("%d must be 0, 1, 2, 3 or 4" % basis)
@@ -526,7 +787,11 @@ def yearfrac(start_date, end_date, basis = 0): # Excel reference: https://suppor
     return result
 
 
-def xlEq(value1, value2):
+def alpha_value(text):
+    return sum(ord(char) for char in text)
+
+
+def xl_eq(value1, value2):
     if all(isinstance(value, number_types) for value in (value1, value2)):
         return float(value1) == float(value2)
     # in Excel capitalization does not matter
@@ -543,11 +808,11 @@ def xlEq(value1, value2):
             return False
 
 
-def alpha_value(text):
-    return sum(ord(char) for char in text)
+def xl_neq(value1, value2):
+    return not xl_eq(value1, value2)
 
 
-def xlGT(value1, value2):
+def xl_gt(value1, value2):
     if all(isinstance(value, number_types) for value in (value1, value2)):
         return float(value1) > float(value2)
     # in Excel capitalization does not matter
@@ -569,25 +834,29 @@ def xlGT(value1, value2):
             return False
 
 
-def xlGTE(value1, value2):
-    return xlEq(value1, value2) or xlGT(value1, value2)
+def xl_gte(value1, value2):
+    return xl_eq(value1, value2) or xl_gt(value1, value2)
 
 
-def xlLT(value1, value2):
-    return not xlGTE(value1, value2)
+def xl_lt(value1, value2):
+    return not xl_gte(value1, value2)
 
 
-def xlLTE(value1, value2):
-    return not xlGT(value1, value2)
+def xl_lte(value1, value2):
+    return not xl_gt(value1, value2)
 
 
-def isNa(value):
+def isNa(val):
     # This function might need more solid testing
+    # TODO: maybe use proper float('nan') and test against that
     try:
-        eval(value)
+        eval(val)
         return False
-    except:
+    except (ValueError, TypeError):
         return True
+    except Exception as exc:
+        return True
+        logger.debug("'{}' evaluated as #NA but not ValueError nor TypeError, {}".format(val, exc))
 
 
 if __name__ == '__main__':

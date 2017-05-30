@@ -1,0 +1,21 @@
+sudo: false
+language: python
+python:
+  - "pypy"
+  - "2.7"
+  - "3.3"
+  - "3.4"
+  - "3.5"
+  - "3.6"
+  - "nightly"
+cache: pip
+# commands to install dependencies
+install:
+  - pip install --upgrade pip coverage codecov
+  - python setup.py -q install
+# commands to run tests
+script:
+  - py.test tests/*
+  - coverage run --source='.' system_architect/manage.py test system_architect
+  - coverage report -m
+  - codecov --token=$CODECOV_TOKEN

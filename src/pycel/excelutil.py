@@ -1,19 +1,23 @@
 from __future__ import division, print_function, unicode_literals
 import collections
 from decimal import Decimal
-import functools
+from numpy import ndarray
 import re
 import string
-from six import string_types
+from six import integer_types, string_types
 try:
     from itertools import izip
 except ImportError:
     izip = zip
 
 
-#TODO: only supports rectangular ranges
+number_types = (float, integer_types, Decimal)
+list_types = (list, tuple, ndarray, set)
+
+
+# TODO: fix so it not only supports rectangular ranges
 class CellRange(object):
-    def __init__(self,address,sheet=None):
+    def __init__(self, address, sheet=None):
         self.__address = address.replace('$','')
 
         sh,start,end = split_range(address)
@@ -26,9 +30,9 @@ class CellRange(object):
         else:
             self.__address = sheet + "!" + self.__address
 
-        addr,nrows,ncols = resolve_range(address,sheet=sheet)
+        addr, nrows, ncols = resolve_range(address, sheet=sheet)
 
-        # dont allow messing with these params
+        # do not allow messing with these params
         self.__celladdr = addr
         self.__nrows = nrows
         self.__ncols = ncols
@@ -58,6 +62,7 @@ class CellRange(object):
     def sheet(self):
         return self.__sheet
 
+
 class Cell(object):
     ctr = 0
 
@@ -67,10 +72,10 @@ class Cell(object):
         return cls.ctr
 
     def __init__(self, address, sheet, value=None, formula=None):
-        super(Cell,self).__init__()
+        super(Cell, self).__init__()
 
         # remove $'s
-        address = address.replace('$','')
+        address = address.replace('$', '')
 
         sh, c, r = split_address(address)
 
@@ -79,7 +84,7 @@ class Cell(object):
             raise Exception("Sheet name may not be empty for cell address %s" % address)
         # both exist but disagree
         elif sh and sheet and sh != sheet:
-            raise Exception("Sheet name mismatch for cell address %s: %s vs %s" % (address,sheet, sh))
+            raise Exception("Sheet name mismatch for cell address %s: %s vs %s" % (address, sheet, sh))
         elif not sh and sheet:
             sh = sheet
         else:
@@ -137,20 +142,23 @@ class Cell(object):
         self.compile()
 
     def clean_name(self):
-        return self.address().replace('!','_').replace(' ','_')
+        return self.address().replace('!', '_').replace(' ', '_')
 
     def address(self, absolute=True):
         if absolute:
-            return "%s!%s%s" % (self.__sheet,self.__col,self.__row)
+            return "%s!%s%s" % (self.__sheet, self.__col, self.__row)
         else:
-            return "%s%s" % (self.__col,self.__row)
+            return "%s%s" % (self.__col, self.__row)
 
     def address_parts(self):
-        return (self.__sheet,self.__col,self.__row,self.__col_idx)
+        return self.__sheet, self.__col, self.__row, self.__col_idx
 
     def compile(self):
         if not self.python_expression:
             return None
+
+        if not isinstance(self.python_expression, string_types):
+            self.python_expression = str(self.python_expression)
 
         # if we are a constant string, surround by quotes
         if isinstance(self.value, string_types) and not self.formula and not self.python_expression.startswith('"'):
@@ -159,7 +167,8 @@ class Cell(object):
         try:
             self._compiled_expression = compile(self.python_expression, '<string>', 'eval')
         except Exception as e:
-            raise Exception("Failed to compile cell %s with expression %s: %s" % (self.address(), self.python_expression, e))
+            raise Exception("Failed to compile cell %s with expression %s: %s" % (self.address(),
+                                                                                  self.python_expression, e))
 
     def __str__(self):
         if self.formula:
@@ -168,14 +177,14 @@ class Cell(object):
             return "%s=%s" % (self.address(), self.value)
 
     @staticmethod
-    def inc_col_address(address,inc):
-        sh,col,row = split_address(address)
-        return "%s!%s%s" % (sh,num2col(col2num(col) + inc),row)
+    def inc_col_address(address, inc):
+        sh, col, row = split_address(address)
+        return "%s!%s%s" % (sh, num2col(col2num(col) + inc), row)
 
     @staticmethod
-    def inc_row_address(address,inc):
-        sh,col,row = split_address(address)
-        return "%s!%s%s" % (sh,col,row+inc)
+    def inc_row_address(address, inc):
+        sh, col, row = split_address(address)
+        return "%s!%s%s" % (sh, col, row + inc)
 
     @staticmethod
     def resolve_cell(excel, address, sheet=None):
@@ -193,17 +202,18 @@ class Cell(object):
         return c
 
     @staticmethod
-    def make_cells(excel, range, sheet=None):
-        cells = [];
+    def make_cells(excel, rng, sheet=None):
+        cells = []
 
-        def convert_range(range, sheet=None):
+        def convert_range(rng, sheet=None):
             cells = []
 
             # use the sheet specified in the range, else the passed sheet
-            sh,start,end = split_range(range)
-            if sh: sheet = sh
+            sh, start, end = split_range(rng)
+            if sh:
+                sheet = sh
 
-            ads,numrows,numcols = resolve_range(range)
+            ads, numrows, numcols = resolve_range(rng)
             # ensure in the same nested format as fs/vs will be
             if numrows == 1:
                 ads = [ads]
@@ -211,17 +221,17 @@ class Cell(object):
                 ads = [[x] for x in ads]
 
             # get everything in blocks, is faster
-            r = excel.get_range(range)
+            r = excel.get_range(rng)
             fs = r.Formula
             vs = r.Value
 
-            for it in (list(izip(*x)) for x in izip(ads,fs,vs)):
+            for it in (list(izip(*x)) for x in izip(ads, fs, vs)):
                 row = []
                 for c in it:
                     a = c[0]
                     f = c[1] if c[1] and c[1].startswith('=') else None
                     v = c[2]
-                    cl = Cell(a,sheet,value=v, formula=f)
+                    cl = Cell(a, sheet, value=v, formula=f)
                     row.append(cl)
                 cells.append(row)
 
@@ -235,8 +245,8 @@ class Cell(object):
 
             return cells, numrows, numcols
 
-        if isinstance(range, list): # if a list of cells
-            for cell in range:
+        if isinstance(rng, list_types):  # if a list of cells
+            for cell in rng:
                 if is_range(cell):
                     cs_in_range, nr, nc = convert_range(cell, sheet)
                     cells.append(cs_in_range)
@@ -250,11 +260,11 @@ class Cell(object):
             return cells, -1, -1
 
         else:
-            if is_range(range):
-                cells, numrows, numcols = convert_range(range, sheet)
+            if is_range(rng):
+                cells, numrows, numcols = convert_range(rng, sheet)
 
             else:
-                c = Cell.resolve_cell(excel, range, sheet=sheet)
+                c = Cell.resolve_cell(excel, rng, sheet=sheet)
                 cells.append(c)
 
                 numrows = 1
@@ -262,23 +272,26 @@ class Cell(object):
 
             return cells, numrows, numcols
 
+
 def is_range(address):
     return address.find(':') > 0
 
+
 def split_range(rng):
     if rng.find('!') > 0:
-        sh,r = rng.split("!")
-        start,end = r.split(':')
+        sh, r = rng.split("!")
+        start, end = r.split(':')
     else:
         sh = None
-        start,end = rng.split(':')
+        start, end = rng.split(':')
 
     return sh, start, end
+
 
 def split_address(address):
     sheet = None
     if address.find('!') > 0:
-        sheet,address = address.split('!')
+        sheet, address = address.split('!')
 
     #ignore case
     address = address.upper()
@@ -301,7 +314,7 @@ def split_address(address):
     return sheet, col, row
 
 
-def resolve_range(rng, flatten=False, sheet=''):
+def resolve_range(rng, make_flat=False, sheet=''):
     sh, start, end = split_range(rng)
     if sh and sheet:
         if sh != sheet:
@@ -316,12 +329,13 @@ def resolve_range(rng, flatten=False, sheet=''):
         pass
 
     # single cell, no range
-    if not is_range(rng):  return ([sheet + rng],1,1)
+    if not is_range(rng):
+        return [sheet + rng], 1, 1
 
     sh, start_col, start_row = split_address(start)
     sh, end_col, end_row = split_address(end)
     start_col_idx = col2num(start_col)
-    end_col_idx = col2num(end_col);
+    end_col_idx = col2num(end_col)
 
     start_row = int(start_row)
     end_row = int(end_row)
@@ -329,31 +343,33 @@ def resolve_range(rng, flatten=False, sheet=''):
     # single column
     if  start_col == end_col:
         nrows = end_row - start_row + 1
-        data = [ "%s%s%s" % (s,c,r) for (s,c,r) in zip([sheet] * nrows,
-                                                       [start_col] * nrows,
-                                                       range(start_row,end_row + 1))]
+        data = ["%s%s%s" % (s, c, r) for (s, c, r) in zip([sheet] * nrows,
+                                                          [start_col] * nrows,
+                                                          range(start_row,end_row + 1))]
         return data, len(data), 1
 
     # single row
     elif start_row == end_row:
         ncols = end_col_idx - start_col_idx + 1
-        data = [ "%s%s%s" % (s,num2col(c),r) for (s,c,r) in zip([sheet]*ncols,range(start_col_idx,end_col_idx+1),[start_row]*ncols)]
-        return data,1,len(data)
+        data = ["%s%s%s" % (s, num2col(c), r) for (s, c, r) in zip([sheet]*ncols,
+                                                                   range(start_col_idx, end_col_idx+1),
+                                                                   [start_row]*ncols)]
+        return data, 1, len(data)
 
     # rectangular range
     else:
         cells = []
-        for r in range(start_row,end_row+1):
+        for r in range(start_row, end_row+1):
             row = []
-            for c in range(start_col_idx,end_col_idx+1):
+            for c in range(start_col_idx, end_col_idx+1):
                 row.append(sheet + num2col(c) + str(r))
 
             cells.append(row)
 
-        if flatten:
+        if make_flat:
             # flatten into one list
-            l = flatten(cells)
-            return l,1,len(l)
+            flat_cells = list(flatten(cells))
+            return flat_cells, 1, len(flat_cells)
         else:
             return cells, len(cells), len(cells[0])
 
@@ -382,7 +398,7 @@ def num2col(num):
     while q > 0:
         (q, r) = divmod(q, 26)
         if r == 0:
-            q = q - 1
+            q -= 1
             r = 26
         s = string.ascii_uppercase[r-1] + s
     return s
@@ -393,7 +409,7 @@ def address2index(a):
     return col2num(c), int(r)
 
 
-def index2addres(c,r,sheet=None):
+def index2addres(c, r, sheet=None):
     return "%s%s%s" % (sheet + "!" if sheet else "", num2col(c), r)
 
 
@@ -410,7 +426,7 @@ def get_linest_degree(excel,cl):
         if f is None or f != cl.formula:
             break
         else:
-            i = i - 1
+            i -= 1
 
     # to the right
     j = ci + 1
@@ -419,39 +435,40 @@ def get_linest_degree(excel,cl):
         if f is None or f != cl.formula:
             break
         else:
-            j = j + 1
+            j += 1
 
     # assume the degree is the number of linest's
-    degree =  (j - i - 1) - 1  #last -1 is because an n degree polynomial has n+1 coefs
+    # last -1 is because an n degree polynomial has n+1 coefs
+    degree = (j - i - 1) - 1
 
     # which coef are we (left most coef is the coef for the highest power)
-    coef = ci - i
+    coeff = ci - i
 
     # no linests left or right, try looking up/down
     if degree == 0:
         # up
         i = r - 1
         while i > 0:
-            f = excel.get_formula_from_range("%s%s" % (c,i))
+            f = excel.get_formula_from_range("%s%s" % (c, i))
             if f is None or f != cl.formula:
                 break
             else:
-                i = i - 1
+                i -= 1
 
         # down
         j = r + 1
         while True:
-            f = excel.get_formula_from_range("%s%s" % (c,j))
+            f = excel.get_formula_from_range("%s%s" % (c, j))
             if f is None or f != cl.formula:
                 break
             else:
-                j = j + 1
+                j += 1
 
-        degree =  (j - i - 1) - 1
-        coef = r - i
+        degree = (j - i - 1) - 1
+        coeff = r - i
 
     # if degree is zero -> only one linest formula -> linear regression -> degree should be one
-    return (max(degree,1),coef)
+    return max(degree, 1), coeff
 
 
 def flatten(l):
@@ -466,10 +483,11 @@ def flatten(l):
 def uniqueify(seq):
     seen = set()
     seen_add = seen.add
-    return [ x for x in seq if x not in seen and not seen_add(x)]
+    return [x for x in seq if x not in seen and not seen_add(x)]
 
 
-def is_number(s): # http://stackoverflow.com/questions/354038/how-do-i-check-if-a-string-is-a-number-float-in-python
+def is_number(s):
+    # http://stackoverflow.com/questions/354038/how-do-i-check-if-a-string-is-a-number-float-in-python
     try:
         float(s)
         return True
@@ -511,7 +529,7 @@ def normalize_year(y, m, d):
         normalize_year(y, m, d)
     elif m > 12:
         y += int(m / 12)
-        m = m % 12
+        m %= 12
 
     if d <= 0:
         d += get_max_days_in_month(m, y)
@@ -537,7 +555,7 @@ def normalize_year(y, m, d):
             d -= 31
             y, m, d = normalize_year(y, m, d)
 
-    return (y, m, d)
+    return y, m, d
 
 
 def date_from_int(nb):
@@ -566,7 +584,7 @@ def date_from_int(nb):
                 current_day = nb
                 nb = 0
 
-    return (current_year, current_month, current_day)
+    return current_year, current_month, current_day
 
 
 def criteria_parser(criteria):
@@ -613,13 +631,13 @@ def criteria_parser(criteria):
     return check
 
 
-def find_corresponding_index(range, criteria):
+def find_corresponding_index(rng, criteria):
     # parse criteria
     check = criteria_parser(criteria)
 
     valid = []
 
-    for index, item in enumerate(range):
+    for index, item in enumerate(rng):
         if check(item):
             valid.append(index)
 
@@ -630,16 +648,16 @@ def almost_equal(v1, v2, tol=0.01):
     if all(isinstance(v, (int, float, Decimal)) for v in (v1, v2)):
         div = float(v1) if v1 != 0 else 1
         return abs(float(v1) - float(v2)) / div < tol
-    if all(isinstance(v, (list, tuple, set)) for v in (v1, v2)):
+    if all(isinstance(v, list_types) for v in (v1, v2)):
         if len(v1) != len(v2):
-            if any(len(v) == 1 and isinstance(v[0], (list, tuple, set)) for v in (v1, v2)):
+            if any(len(v) == 1 and isinstance(v[0], list_types) for v in (v1, v2)):
                 if all((len(v1),
-                        isinstance(v1[0], (list, tuple, set)),
+                        isinstance(v1[0], list_types),
                         len(v1[0]) == len(v2))):
                     return almost_equal(v1[0], v2)
                 elif all((len(v2),
-                        isinstance(v2[0], (list, tuple, set)),
-                        len(v2[0]) == len(v1))):
+                          isinstance(v2[0], list_types),
+                          len(v2[0]) == len(v1))):
                     return almost_equal(v1, v2[0])
                 else:
                     return False
@@ -649,10 +667,10 @@ def almost_equal(v1, v2, tol=0.01):
             if not almost_equal(item, v2[idx]):
                 return False
         return True
-    if any(isinstance(v, (list, tuple, set)) and len(v) == 1 for v in (v1, v2)):
-        if isinstance(v1, (list, tuple, set)):
+    if any(isinstance(v, list_types) and len(v) == 1 for v in (v1, v2)):
+        if isinstance(v1, list_types):
             return almost_equal(v1[0], v2)
-        elif isinstance(v2, (list, tuple, set)):
+        elif isinstance(v2, list_types):
             return almost_equal(v1, v2[0])
     return v1 == v2
 

@@ -1,51 +1,34 @@
 from __future__ import print_function, division, unicode_literals
-# We will choose our wrapper with os compatibility
-#       ExcelComWrapper : Must be run on Windows as it requires a COM link to an Excel instance.
-#       ExcelOpxWrapper : Can be run anywhere but only with post 2010 Excel formats
 from collections import defaultdict, OrderedDict
 from functools import reduce
 from logging import getLogger
-# TODO: make this import more specific
-from math import *
+from math import (acos, acosh, asin, asinh, atan, atan2, atanh, cos, cosh, exp, sin, sinh, sqrt, tan, tanh)
 from networkx import DiGraph, spring_layout, draw_networkx_nodes, draw_networkx_edges, draw_networkx_labels
 from networkx.drawing.nx_pydot import write_dot
-from networkx.drawing.nx_pylab import draw, draw_circular
 from networkx.readwrite.gexf import write_gexf
 import pickle
 from six import itervalues
-
-from logging import getLogger
-
-logger = getLogger(__name__)
-
-try:
-    import win32com.client
-    import pythoncom
-    from pycel.excelwrapper import ExcelComWrapper as ExcelWrapperImpl
-except:
-    logger.debug("Can't import win32com -> switching from COM to Openpyxl wrapping implementation")
-    from pycel.excelwrapper import ExcelOpxWrapper as ExcelWrapperImpl
-
 try:
     import matplotlib.pyplot as plt
 except ImportError:
-    logger.debug("Could not import matplotlib")
     plt = None
 
 # TODO: make these imports more specific
 from .excellib import *
 from .excelutil import *
+from .excelwrapper import wrapper_implementation
 from .tokenizer import ExcelParser, f_token, shunting_yard
 
 __version__ = filter(str.isdigit, "$Revision: 2524 $")
 __date__ = filter(str.isdigit, "$Date: 2011-09-06 17:05:00 +0100 (Tue, 06 Sep 2011) $")
 __author__ = filter(str.isdigit, "$Author: dg2d09 $")
 
+logger = getLogger(__name__)
+
 
 class Spreadsheet(object):
-    def __init__(self, wb, G, cellmap, filename=''):
+    def __init__(self, G, cellmap, filename=''):
         super(Spreadsheet, self).__init__()
-        self.wb = wb
         self.G = G
         self.cellmap = cellmap
         self.filename = filename
@@ -53,7 +36,7 @@ class Spreadsheet(object):
 
         self.dependent = tuple(set(edge[1].address() for edge in self.G.edges()))
         self.independent = tuple([name for name, cell in self.cellmap.items()
-                                  if name not in self.dependent and cell.value != None])
+                                  if name not in self.dependent and cell.value is not None])
 
         data = defaultdict(set)
         for edge in self.G.edges():
@@ -61,8 +44,8 @@ class Spreadsheet(object):
         self.sorted_cells = tuple(self.topological_sort(data))
 
     @staticmethod
-    def load_from_file(fname):
-        with open(fname,'rb') as f:
+    def load_from_file(filename):
+        with open(filename, 'rb') as f:
             obj = pickle.load(f)
         return obj
 
@@ -101,7 +84,7 @@ class Spreadsheet(object):
             v.discard(k)
         # Find all items that don't depend on anything
         extra_items_in_deps = reduce(set.union, data.values()) - set(data.keys())
-        # Add empty dependences where needed
+        # Add empty dependencies where needed
         data.update({item: set() for item in extra_items_in_deps})
         while True:
             ordered = set(item for item, dep in data.items() if not dep)
@@ -110,29 +93,32 @@ class Spreadsheet(object):
             yield ordered
             data = {item: (dep - ordered) for item, dep in data.items()
                     if item not in ordered}
-        assert not data, "Cyclic dependencies exist among these items:\n\t%s" % \
-                         '\n'.join(repr(x) for x in data.items())
+        try:
+            assert not data, "Cyclic dependencies exist among these items:\n\t%s" % \
+                             '\n'.join(repr(x) for x in data.items())
+        except AssertionError:
+            logger.debug("Found cycle in dependencies")
 
-    def find_divergence(self):
+    def find_divergence(self, wb):
         invalid_cells = []
         for cell_names in self.sorted_cells:
             for cell_name in cell_names:
-                xlval = self.wb.excel.get_range(cell_name).value2
+                xlval = wb.excel.get_range(cell_name).value2
                 if not almost_equal(xlval, self.cellmap[cell_name].value):
                     invalid_cells.append((cell_name, xlval, self.cellmap[cell_name].value))
             if invalid_cells:
                 break
         return invalid_cells
 
-    def save_to_file(self, fname):
-        with open(fname, 'wb') as f:
-            pickle.dump(self, f, protocol=2)
+    def save_to_file(self, filename, protocol=2):
+        with open(filename, 'wb') as fp:
+            pickle.dump(self, fp, protocol=protocol)
 
-    def export_to_dot(self, fname):
-        write_dot(self.G, fname)
+    def export_to_dot(self, filename):
+        write_dot(self.G, filename)
 
-    def export_to_gexf(self, fname):
-        write_gexf(self.G, fname)
+    def export_to_gexf(self, filename):
+        write_gexf(self.G, filename)
 
     def plot_graph(self, iterations=2000, show_arrows=True):
         if plt:
@@ -190,48 +176,71 @@ class Spreadsheet(object):
         if nrows == 1 or ncols == 1:
             data = [self.evaluate(cell) for cell in cells]
         else:
-            data = [[self.evaluate(cell) for cell in cells[i]] for i in range(len(cells))]
+            data = [[self.evaluate(cell) for cell in cells[j]] for j in range(len(cells))]
 
         rng.value = data
         return data
 
     def evaluate(self, cell, is_addr=True):
-
         if is_addr:
             cell = self.cellmap[cell]
 
         # no formula, fixed value
-        if not cell.formula or cell.value != None:
+        if not cell.formula or cell.value is not None:
             # Returning constant or cached value for cell
             return cell.value
 
-        # recalculate formula
-        # the compiled expression calls this function
         def eval_cell(address):
-            return self.evaluate(address)
+            """
+            Recalculate the values based on the formula.
+
+            :param address:
+            :return:
+
+            .. note::
+                The compiled expression calls this function.
+            """
+
+            result = self.evaluate(address)
+            if result is None:
+                return 0.
+            return result
 
         def eval_range(rng):
+            """
+            Recalculate the values of the range based on the formulas of the cells.
+
+            :param rng:
+            :return:
+
+            .. note::
+                The compiled expression calls this function.
+            """
+            # TODO: add a similar check to replace Nones with 0.0
             return self.evaluate_range(rng)
 
         try:
-            logger.debug("Evalling: %s, %s" % (cell.address(), cell.python_expression))
-            value = eval(cell.compiled_expression)
-            if value is None:
-                logger.warn("%s is None" % (cell.address()))
-            cell.value = value
-        except TypeError:
-            if 'if' in cell.python_expression:
-                logger.error("Must fix for Cell '{}' ({})".format(cell.address(), cell.python_expression))
-                cell.value = 0
-            else:
-                logger.error("Cell '{}' ({}) is also busted!".format(cell.address(), cell.python_expression))
+            logger.debug("Evaluating: %s, %s" % (cell.address(), cell.python_expression))
+            cell.value = eval(cell.compiled_expression)
+        except TypeError as exc:
+            if 'if ' in cell.python_expression:
+                logger.error("IF statement TypeError failure!")
+            cell.value = 0.
+            logger.error("TypeError for '{}' ({})".format(cell.address(), cell.python_expression))
+            logger.error("{}".format(exc))
         except Exception as exc:
-            if exc.args[0].startswith("Problem evalling"):
+            if exc.args[0].startswith("Problem evaluating"):
                 raise exc
             else:
-                raise Exception("Problem evalling: %s for %s, %s" % (exc,
-                                                                     cell.address(),
-                                                                     cell.python_expression))
+                raise Exception("Problem evaluating: %s for %s, %s" % (exc, cell.address(),
+                                                                       cell.python_expression))
+
+        # Cells in Excel that are empty have an effective numerical value of zero
+        if cell.value is None and cell.formula:
+            cell.value = 0.
+
+        if cell.value is None:
+            return 0.
 
         return cell.value
 
@@ -252,7 +261,6 @@ class ASTNode(object):
     def children(self,ast):
         args = ast.predecessors(self)
         args = sorted(args, key=lambda x: ast.node[x]['pos'])
-        #args.reverse()
         return args
 
     def parent(self,ast):
@@ -261,7 +269,7 @@ class ASTNode(object):
 
     def emit(self,ast, context=None):
         """Emit code"""
-        self.token.tvalue
+        return self.token.tvalue
 
 
 class OperatorNode(ASTNode):
@@ -270,15 +278,16 @@ class OperatorNode(ASTNode):
 
         # convert the operator to python equivalents
         self.opmap = {
-                 "^": "**",
-                 "=": "xlEq",
-                 "&": "+",
-                 "": "+", # union
-                 ">": "xlGT",
-                 "<": "xlLT",
-                 ">=": "xlGTE",
-                 "<=": "xlLTE",
-                 }
+            "^": "**",
+            "&": "+",
+            "": "+",  # union
+            "=": "xl_eq",
+            "<>": "xl_neq",
+            ">": "xl_gt",
+            "<": "xl_lt",
+            ">=": "xl_gte",
+            "<=": "xl_lte",
+        }
 
     def emit(self, ast, context=None):
         xop = self.tvalue
@@ -292,15 +301,15 @@ class OperatorNode(ASTNode):
             return "-" + args[0].emit(ast, context=context)
 
         parent = self.parent(ast)
-        # dont render the ^{1,2,..} part in a linest formula
-        #TODO: bit of a hack
+        # do not render the ^{1,2,..} part in a linest formula
+        # TODO: bit of a hack
         if op == "**":
             if parent and parent.tvalue.lower() == "linest":
                 return args[0].emit(ast, context=context)
 
         # work around because None < 0 is True (happens on blank cells)
         # TODO: make this work for string to number and string to string comparisons like Excel
-        if op in ('xlLT', 'xlGT', 'xlLTE', 'xlGTE', 'xlEq'):
+        if op in ('xl_lt', 'xl_gt', 'xl_lte', 'xl_gte', 'xl_eq'):
             ss = "{}({}, {})".format(op,
                                      args[0].emit(ast, context=context),
                                      args[1].emit(ast, context=context))
@@ -309,7 +318,7 @@ class OperatorNode(ASTNode):
 
         # avoid needless parentheses
         if parent and not isinstance(parent, FunctionNode):
-            ss = "("+ ss + ")"
+            ss = "(" + ss + ")"
 
         return ss
 
@@ -317,14 +326,15 @@ class OperatorNode(ASTNode):
 class OperandNode(ASTNode):
     def __init__(self,*args):
         super(OperandNode,self).__init__(*args)
+
     def emit(self,ast, context=None):
         t = self.tsubtype
 
         if t == "logical":
             return str(self.tvalue.lower() == "true")
         elif t == "text" or t == "error":
-            #if the string contains quotes, escape them
-            val = self.tvalue.replace('"','\\"')
+            # if the string contains quotes, escape them
+            val = self.tvalue.replace('"', '\\"')
             return '"' + val + '"'
         else:
             return str(self.tvalue)
@@ -332,36 +342,36 @@ class OperandNode(ASTNode):
 
 class RangeNode(OperandNode):
     """Represents a spreadsheet cell or range, e.g., A5 or B3:C20"""
-    def __init__(self,*args):
-        super(RangeNode,self).__init__(*args)
+    def __init__(self, *args):
+        super(RangeNode, self).__init__(*args)
 
     def get_cells(self):
         return resolve_range(self.tvalue)[0]
 
     def emit(self,ast, context=None):
         # resolve the range into cells
-        rng = self.tvalue.replace('$','')
+        rng = self.tvalue.replace('$', '')
         sheet = context.curcell.sheet + "!" if context else ""
         if is_range(rng):
-            sh,start,end = split_range(rng)
+            sh, start, end = split_range(rng)
             if sh:
-                str = 'eval_range("' + rng + '")'
+                result = 'eval_range("' + rng + '")'
             else:
-                str = 'eval_range("' + sheet + rng + '")'
+                result = 'eval_range("' + sheet + rng + '")'
         else:
-            sh,col,row = split_address(rng)
+            sh, col, row = split_address(rng)
             if sh:
-                str = 'eval_cell("' + rng + '")'
+                result = 'eval_cell("' + rng + '")'
             else:
-                str = 'eval_cell("' + sheet + rng + '")'
+                result = 'eval_cell("' + sheet + rng + '")'
 
-        return str
+        return result
 
 
 class FunctionNode(ASTNode):
     """AST node representing a function call"""
     def __init__(self,*args):
-        super(FunctionNode,self).__init__(*args)
+        super(FunctionNode, self).__init__(*args)
         self.numargs = 0
 
         # map  excel functions onto their python equivalents
@@ -383,9 +393,12 @@ class FunctionNode(ASTNode):
         elif fun == "if":
             # inline the if
             if len(args) == 2:
-                result = "%s if %s else False" % (args[1].emit(ast, context=context), args[0].emit(ast, context=context))
+                result = "%s if %s else False" % (args[1].emit(ast, context=context),
+                                                  args[0].emit(ast, context=context))
             elif len(args) == 3:
-                result = "(%s if %s else %s)" % (args[1].emit(ast, context=context),args[0].emit(ast, context=context), args[2].emit(ast, context=context))
+                result = "(%s if %s else %s)" % (args[1].emit(ast, context=context),
+                                                 args[0].emit(ast, context=context),
+                                                 args[2].emit(ast, context=context))
             else:
                 raise Exception("if with %s arguments not supported" % len(args))
 
@@ -399,13 +412,13 @@ class FunctionNode(ASTNode):
                 result += ",".join(['[' + n.emit(ast, context=context) + ']' for n in args])
             result += ']'
         elif fun == "arrayrow":
-            #simply create a list
+            # simply create a list
             result += ",".join([n.emit(ast, context=context) for n in args])
         # TODO: figure out what is "linestmario"
         elif fun == "linest" or fun == "linestmario":
             result = fun + "(" + ",".join([n.emit(ast, context=context) for n in args])
             if not context:
-                degree, coef = -1,-1
+                degree, coef = -1, -1
             else:
                 #linests are often used as part of an array formula spanning multiple cells,
                 #one cell for each coefficient.  We have to figure out where we currently are
@@ -421,7 +434,7 @@ class FunctionNode(ASTNode):
                     result += ")"
             else:
                 if fun == "linest":
-                    result += ", degree=%s)[%s]" % (degree,coef-1)
+                    result += ", degree=%s)[%s]" % (degree, coef-1)
                 else:
                     result += ")[%s]" % (coef-1)
 
@@ -454,8 +467,9 @@ def create_node(t):
 
 class Operator(object):
     """Small wrapper class to manage operators during shunting yard"""
-    def __init__(self, value, precedence, associativity):
-        self.value = value
+    def __init__(self, val, precedence, associativity):
+        super(Operator, self).__init__()
+        self.value = val
         self.precedence = precedence
         self.associativity = associativity
 
@@ -464,15 +478,16 @@ def shunting_yard(expression):
     """
     Tokenize an excel formula expression into reverse polish notation
 
-    Core algorithm taken from wikipedia with varargs extensions from
-    http://www.kallisti.net.nz/blog/2008/02/extension-to-the-shunting-yard-algorithm-to-allow-variable-numbers-of-arguments-to-functions/
+    .. note::
+        Core algorithm taken from wikipedia with varargs extensions from
+        http://www.kallisti.net.nz/blog/2008/02/extension-to-the-shunting-yard-algorithm-to-allow-variable-numbers-of-arguments-to-functions/
 
     """
-    #remove leading =
+    # remove leading '='
     if expression.startswith('='):
         expression = expression[1:]
 
-    p = ExcelParser();
+    p = ExcelParser()
     p.parse(expression)
 
     # insert tokens for '(' and ')', to make things clearer below
@@ -493,25 +508,27 @@ def shunting_yard(expression):
         else:
             tokens.append(t)
 
-    #http://office.microsoft.com/en-us/excel-help/calculation-operators-and-precedence-HP010078886.aspx
-    operators = {':': Operator(':', 8, 'left'),
-                 '': Operator(' ', 8, 'left'),
-                 ',': Operator(',', 8, 'left'),
-                 'u-': Operator('u-', 7, 'left'), #unary negation
-                 '%': Operator('%', 6, 'left'),
-                 '^': Operator('^', 5, 'left'),
-                 '*': Operator('*', 4, 'left'),
-                 '/': Operator('/', 4, 'left'),
-                 '+': Operator('+', 3, 'left'),
-                 '-': Operator('-', 3, 'left'),
-                 '&': Operator('&', 2, 'left'),
-                 '=': Operator('=', 1, 'left'),
-                 '<': Operator('<', 1, 'left'),
-                 '>': Operator('>', 1, 'left'),
-                 '<=': Operator('<=', 1, 'left'),
-                 '>=': Operator('>=', 1, 'left'),
-                 '<>': Operator('<>', 1, 'left'),
-                 }
+    # All the MS Excel operators, as described in:
+    # http://office.microsoft.com/en-us/excel-help/calculation-operators-and-precedence-HP010078886.aspx
+    operators = {
+        ':': Operator(':', 8, 'left'),
+        '': Operator(' ', 8, 'left'),
+        ',': Operator(',', 8, 'left'),
+        'u-': Operator('u-', 7, 'left'),  # unary negation
+        '%': Operator('%', 6, 'left'),
+        '^': Operator('^', 5, 'left'),
+        '*': Operator('*', 4, 'left'),
+        '/': Operator('/', 4, 'left'),
+        '+': Operator('+', 3, 'left'),
+        '-': Operator('-', 3, 'left'),
+        '&': Operator('&', 2, 'left'),
+        '=': Operator('=', 1, 'left'),
+        '<': Operator('<', 1, 'left'),
+        '>': Operator('>', 1, 'left'),
+        '<=': Operator('<=', 1, 'left'),
+        '>=': Operator('>=', 1, 'left'),
+        '<>': Operator('<>', 1, 'left'),
+    }
 
     output = collections.deque()
     stack = []
@@ -546,25 +563,22 @@ def shunting_yard(expression):
                 raise Exception("Mismatched or misplaced parentheses")
 
         elif t.ttype.startswith('operator'):
-            if t.ttype.endswith('-prefix') and t.tvalue =="-":
+            if t.ttype.endswith('-prefix') and t.tvalue == "-":
                 o1 = operators['u-']
             else:
                 o1 = operators[t.tvalue]
 
             while stack and stack[-1].ttype.startswith('operator'):
-                if stack[-1].ttype.endswith('-prefix') and stack[-1].tvalue =="-":
+                if stack[-1].ttype.endswith('-prefix') and stack[-1].tvalue == "-":
                     o2 = operators['u-']
                 else:
                     o2 = operators[stack[-1].tvalue]
 
-                if ( (o1.associativity == "left" and o1.precedence <= o2.precedence)
-                        or
-                      (o1.associativity == "right" and o1.precedence < o2.precedence) ):
-
+                if any((o1.associativity == "left" and o1.precedence <= o2.precedence,
+                        o1.associativity == "right" and o1.precedence < o2.precedence)):
                     output.append(create_node(stack.pop()))
                 else:
                     break
-
             stack.append(t)
 
         elif t.tsubtype == "start":
@@ -601,7 +615,7 @@ def shunting_yard(expression):
 def build_ast(expression):
     """Build an AST from an Excel formula expression in reverse polish notation."""
 
-    #use a directed graph to store the tree
+    # use a directed graph to store the tree
     G = DiGraph()
 
     stack = []
@@ -650,7 +664,7 @@ class ExcelCompiler(object):
        that can be serialized to disk, and executed independently of excel.
     """
 
-    def __init__(self, filename=None, excel=None, visible=False, *args,**kwargs):
+    def __init__(self, filename=None, excel=None, visible=False):
 
         super(ExcelCompiler,self).__init__()
         self.filename = filename
@@ -659,15 +673,15 @@ class ExcelCompiler(object):
             # if we are running as an excel addin, this gets passed to us
             self.excel = excel
         else:
-            # TODO: use a proper interface so we can (eventually) support loading from file (much faster)  Still need to find a good lib though.
-            self.excel = ExcelWrapperImpl(filename=filename, visible=visible)
+            # TODO: use a proper interface so we can (eventually) support loading from file
+            self.excel = wrapper_implementation(filename=filename, visible=visible)
             self.excel.connect()
 
     def cell2code(self,cell):
         """Generate python code for the given cell"""
         if cell.formula:
             e = shunting_yard(cell.formula or str(cell.value))
-            ast,root = build_ast(e)
+            ast, root = build_ast(e)
             code = root.emit(ast, context=Context(cell, self.excel))
         else:
             ast = None
@@ -678,10 +692,10 @@ class ExcelCompiler(object):
         G.add_node(n)
         G.node[n]['sheet'] = n.sheet
 
-        if isinstance(n,Cell):
+        if isinstance(n, Cell):
             G.node[n]['label'] = n.col + str(n.row)
         else:
-            #strip the sheet
+            # strip the sheet
             G.node[n]['label'] = n.address()[n.address().find('!')+1:]
 
     def gen_graph(self, seed, sheet=None):
@@ -703,7 +717,7 @@ class ExcelCompiler(object):
         logger.debug("Seed %s expanded into %s cells" % (seed, len(seeds)))
 
         # only keep seeds with formulas or numbers
-        seeds = [s for s in seeds if s.formula or isinstance(s.value, (integer_types, float))]
+        seeds = [s for s in seeds if s.formula or isinstance(s.value, number_types)]
 
         logger.debug("%s filtered seeds " % len(seeds))
 
@@ -740,7 +754,7 @@ class ExcelCompiler(object):
             c1.compile()
 
             # get all the cells/ranges this formula refers to
-            deps = [x.tvalue.replace('$','') for x in ast.nodes() if isinstance(x,RangeNode)]
+            deps = [x.tvalue.replace('$', '') for x in ast.nodes() if isinstance(x, RangeNode)]
 
             # remove dupes
             deps = uniqueify(deps)
@@ -749,7 +763,7 @@ class ExcelCompiler(object):
                 # if the dependency is a multi-cell range, create a range object
                 if is_range(dep):
                     # this will make sure we always have an absolute address
-                    rng = CellRange(dep,sheet=cursheet)
+                    rng = CellRange(dep, sheet=cursheet)
 
                     if rng.address() in cellmap:
                         # already dealt with this range
@@ -764,7 +778,7 @@ class ExcelCompiler(object):
                         if nrows == 1 or ncols == 1:
                             rng.value = [c.value for c in cells]
                         else:
-                            rng.value = [[c.value for c in cells[i]] for i in range(len(cells))]
+                            rng.value = [[c.value for c in cells[j]] for j in range(len(cells))]
 
                         # save the range
                         cellmap[rng.address()] = rng
@@ -780,10 +794,10 @@ class ExcelCompiler(object):
 
                 # process each cell
                 for c2 in flatten(cells):
-                    # if we havent treated this cell allready
+                    # if we haven't treated this cell already
                     if c2.address() not in cellmap:
                         if c2.formula:
-                            # cell with a formula, needs to be added to the todo list
+                            # cell with a formula, needs to be added to the `todo` list
                             todo.append(c2)
                         else:
                             # constant cell, no need for further processing, just remember to set the code
@@ -800,9 +814,10 @@ class ExcelCompiler(object):
                     # add an edge from the cell to the parent (range or cell)
                     G.add_edge(cellmap[c2.address()], target)
 
-        logger.info("Graph construction done, %s nodes, %s edges, %s cellmap entries" % (len(G.nodes()), len(G.edges()), len(cellmap)))
+        logger.info("Graph construction done, %s nodes, %s edges, %s cellmap entries" % (len(G.nodes()), len(G.edges()),
+                                                                                         len(cellmap)))
 
-        sp = Spreadsheet(wb=self, G=G, cellmap=cellmap, filename=self.filename)
+        sp = Spreadsheet(G=G, cellmap=cellmap, filename=self.filename)
 
         return sp
 
@@ -859,7 +874,7 @@ if __name__ == '__main__':
         print("**************************************************")
         print("Formula: ", i)
 
-        e = shunting_yard(i);
+        e = shunting_yard(i)
         print("RPN: ",  "|".join([str(x) for x in e]))
 
         G,root = build_ast(e)

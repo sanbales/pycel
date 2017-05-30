@@ -1,22 +1,23 @@
-import os
-import sys
+from os.path import abspath, dirname, join
+from sys import path
 
-dir = os.path.dirname(__file__)
-path = os.path.join(dir, '../src')
-sys.path.insert(0, path)
+if abspath(join(dirname(__file__), '../src')) not in path:
+    path.insert(0, join(dirname(__file__), '../src'))
 
 from pycel.excelutil import Cell
 from pycel.excelcompiler import ExcelCompiler
 
 # RUN AT THE ROOT LEVEL
-excel = ExcelCompiler(os.path.join(dir, "../example/example.xlsx")).excel
+excel = ExcelCompiler(join(dirname(__file__), "../example/example.xlsx")).excel
 cursheet = excel.get_active_sheet()
+
 
 def make_cells():
     global excel, cursheet
 
     my_input = ['A1', 'A2:B3']
     output_cells = Cell.make_cells(excel, my_input, sheet=cursheet)
-    assert len(output_cells) == 5  
+    assert len(output_cells) == 3
+
 
 make_cells()
