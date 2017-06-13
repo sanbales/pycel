@@ -8,8 +8,8 @@ exec(open('src/pycel/version.py').read())
 setup(
     name='Pycel',
     version=__version__,
-    packages=find_packages(),
-    package_dir={'': 'pycel'},
+    packages=find_packages('src'),
+    package_dir={'': 'src'},
     description='A library for compiling MS Excel spreadsheets to Python & visualizing them as a graph',
     url='https://github.com/dgorissen/pycel',
     install_requires=open('requirements.txt', 'r').read().splitlines(),
