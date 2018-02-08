@@ -111,7 +111,7 @@ def xl_max(*args):
     """
 
     # ignore non-numeric cells
-    data = [x for x in flatten(args) if isinstance(x, number_types)]
+    data = [x for x in flatten(args) if is_number(x, number_types)]
 
     # however, if no non numeric cells, return zero (is what excel does)
     if len(data) < 1:
@@ -605,7 +605,7 @@ def xl_round(number, num_digits=0):
         # see https://docs.python.org/2/library/functions.html#round
         # and https://gist.github.com/ejamesc/cedc886c5f36e2d075c5
     else:
-        return round(number, num_digits)
+        return float(round(number, num_digits))
 
 
 def mid(text, start_num, num_chars):

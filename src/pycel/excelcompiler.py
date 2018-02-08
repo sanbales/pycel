@@ -671,7 +671,7 @@ class ExcelCompiler(object):
 
     def __init__(self, filename=None, excel=None, visible=False):
 
-        super(ExcelCompiler,self).__init__()
+        super(ExcelCompiler, self).__init__()
         self.filename = filename
 
         if excel:
