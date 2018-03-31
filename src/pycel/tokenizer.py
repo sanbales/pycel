@@ -57,7 +57,6 @@ class ExcelParserTokens:
     TOK_SUBTYPE_INTERSECT   = "intersect";
     TOK_SUBTYPE_UNION       = "union";
 
-
 #========================================================================
 #       Class: f_token
 # Description: Encapsulate a formula token
