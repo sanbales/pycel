@@ -9,9 +9,9 @@ from pycel.excelutil import (date_from_int, find_corresponding_index, flatten,
                              integer_types, is_leap_year, is_number, list_types,
                              normalize_year, number_types, string_types)
 
-__all__ = ('average', 'count', 'countif', 'countifs', 'date', 'index', 'isNa', 'linest',
-           'ln', 'lookup', 'match', 'mid', 'mod', 'npv', 'right', 'roundup', 'sumif',
-           'value', 'vlookup', 'yearfrac',
+__all__ = ('average', 'count', 'countif', 'countifs', 'date', 'index', 'isNa',
+           'linest', 'ln', 'lookup', 'match', 'mid', 'mod', 'npv', 'right',
+           'roundup', 'sumif', 'value', 'vlookup', 'yearfrac',
            'xl_log', 'xl_round',
            'xl_eq', 'xl_neq', 'xl_gt', 'xl_gte', 'xl_lt', 'xl_lte',
            'xl_max', 'xl_min', 'xl_sum',
@@ -111,7 +111,7 @@ def xl_max(*args):
     """
 
     # ignore non-numeric cells
-    data = [x for x in flatten(args) if is_number(x, number_types)]
+    data = [x for x in flatten(args) if isinstance(x, number_types)]
 
     # however, if no non numeric cells, return zero (is what excel does)
     if len(data) < 1:
@@ -516,7 +516,8 @@ def countifs(*args):
     l = len(arg_list)
 
     if l % 2 != 0:
-        raise Exception('excellib.countifs() must have a pair number of arguments, here %d' % l)
+        raise Exception('excellib.countifs() must have a pair number of '
+                        'arguments, here %d' % l)
 
     if l >= 2:
         # find indexes that match first layer of countif
@@ -605,7 +606,7 @@ def xl_round(number, num_digits=0):
         # see https://docs.python.org/2/library/functions.html#round
         # and https://gist.github.com/ejamesc/cedc886c5f36e2d075c5
     else:
-        return float(round(number, num_digits))
+        return round(number, num_digits)
 
 
 def mid(text, start_num, num_chars):
